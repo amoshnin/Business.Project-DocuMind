@@ -2,6 +2,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from services.document_processor import process_pdf
+from services.retriever import add_documents_to_store, get_hybrid_retriever
 
 
 app = FastAPI(title="DocuMind API")
@@ -30,4 +31,8 @@ async def upload_document(file: UploadFile = File(...)) -> dict[str, int]:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
     chunks = await process_pdf(file_bytes=file_bytes, filename=file.filename)
+    if chunks:
+        await add_documents_to_store(chunks)
+        get_hybrid_retriever(chunks)
+
     return {"chunks_generated": len(chunks)}
