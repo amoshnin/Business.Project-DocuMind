@@ -1,5 +1,7 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+
+from services.document_processor import process_pdf
 
 
 app = FastAPI(title="DocuMind API")
@@ -16,3 +18,16 @@ app.add_middleware(
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.post("/api/v1/documents/upload")
+async def upload_document(file: UploadFile = File(...)) -> dict[str, int]:
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename is required.")
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    chunks = await process_pdf(file_bytes=file_bytes, filename=file.filename)
+    return {"chunks_generated": len(chunks)}
