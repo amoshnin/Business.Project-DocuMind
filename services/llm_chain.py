@@ -1,3 +1,5 @@
+from collections.abc import AsyncIterator
+
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
@@ -84,3 +86,15 @@ async def generate_answer(query: str, retrieved_docs: list[Document]) -> ChatRes
         return result
 
     return ChatResponse.model_validate(result)
+
+
+async def stream_answer_tokens(
+    query: str, retrieved_docs: list[Document]
+) -> AsyncIterator[str]:
+    context = _format_context(retrieved_docs)
+    chain = _prompt | _llm
+
+    async for chunk in chain.astream({"context": context, "query": query}):
+        content = getattr(chunk, "content", "")
+        if isinstance(content, str) and content:
+            yield content

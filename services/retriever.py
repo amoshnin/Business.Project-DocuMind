@@ -72,3 +72,19 @@ def get_hybrid_retriever(chunks_for_bm25: list[Document]) -> EnsembleRetriever:
         weights=[0.5, 0.5],
     )
     return _hybrid_retriever
+
+
+def _get_active_retriever() -> EnsembleRetriever:
+    if _hybrid_retriever is None:
+        raise RuntimeError("Hybrid retriever is not initialized. Upload documents first.")
+
+    return _hybrid_retriever
+
+
+def _retrieve_documents(query: str) -> list[Document]:
+    retriever = _get_active_retriever()
+    return retriever.invoke(query)
+
+
+async def retrieve_documents(query: str) -> list[Document]:
+    return await asyncio.to_thread(_retrieve_documents, query)
