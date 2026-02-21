@@ -1,5 +1,4 @@
 import asyncio
-from typing import List
 from uuid import uuid4
 
 import fitz
@@ -9,8 +8,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from config import get_settings
 
 
-def _extract_pages(file_bytes: bytes, filename: str) -> List[Document]:
-    documents: List[Document] = []
+def _extract_pages(file_bytes: bytes, filename: str) -> list[Document]:
+    documents: list[Document] = []
     with fitz.open(stream=file_bytes, filetype="pdf") as pdf:
         for page_number, page in enumerate(pdf, start=1):
             page_text = page.get_text("text") or ""
@@ -28,8 +27,8 @@ def _extract_pages(file_bytes: bytes, filename: str) -> List[Document]:
 
 
 def _chunk_pages(
-    page_documents: List[Document], filename: str, chunk_size: int
-) -> List[Document]:
+    page_documents: list[Document], filename: str, chunk_size: int
+) -> list[Document]:
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=150,
@@ -43,7 +42,7 @@ def _chunk_pages(
     return chunked_documents
 
 
-async def process_pdf(file_bytes: bytes, filename: str) -> List[Document]:
+async def process_pdf(file_bytes: bytes, filename: str) -> list[Document]:
     page_documents = await asyncio.to_thread(_extract_pages, file_bytes, filename)
     settings = get_settings()
     return await asyncio.to_thread(
