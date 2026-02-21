@@ -1,8 +1,18 @@
+import json
+from collections.abc import AsyncIterator
+
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from services.document_processor import process_pdf
-from services.retriever import add_documents_to_store, get_hybrid_retriever
+from schemas import ChatRequest, ChatResponse
+from services.llm_chain import generate_answer, stream_answer_tokens
+from services.retriever import (
+    add_documents_to_store,
+    get_hybrid_retriever,
+    retrieve_documents,
+)
 
 
 app = FastAPI(title="DocuMind API")
@@ -36,3 +46,44 @@ async def upload_document(file: UploadFile = File(...)) -> dict[str, int]:
         get_hybrid_retriever(chunks)
 
     return {"chunks_generated": len(chunks)}
+
+
+@app.post("/api/v1/chat", response_model=ChatResponse)
+async def chat(request: ChatRequest) -> ChatResponse:
+    try:
+        retrieved_docs = await retrieve_documents(request.query)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return await generate_answer(request.query, retrieved_docs)
+
+
+@app.post("/api/v1/chat/stream")
+async def chat_stream(request: ChatRequest) -> StreamingResponse:
+    try:
+        retrieved_docs = await retrieve_documents(request.query)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    async def event_generator() -> AsyncIterator[str]:
+        try:
+            async for token in stream_answer_tokens(request.query, retrieved_docs):
+                payload = {"type": "token", "token": token}
+                yield f"data: {json.dumps(payload)}\n\n"
+
+            structured_response = await generate_answer(request.query, retrieved_docs)
+            final_payload = {
+                "type": "final",
+                "payload": structured_response.model_dump(mode="json"),
+            }
+            yield f"data: {json.dumps(final_payload)}\n\n"
+            yield "data: [DONE]\n\n"
+        except Exception as exc:  # pragma: no cover
+            error_payload = {"type": "error", "message": str(exc)}
+            yield f"data: {json.dumps(error_payload)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
