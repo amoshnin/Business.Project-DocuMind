@@ -26,11 +26,15 @@ type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   citations?: Citation[];
+  modelUsed?: string;
 };
 
 type ChatStreamEvent =
   | { type: "token"; token?: string }
-  | { type: "final"; payload?: { answer?: string; citations?: Citation[] } }
+  | {
+      type: "final";
+      payload?: { answer?: string; citations?: Citation[]; model_used?: string };
+    }
   | { type: "error"; message?: string };
 
 const INITIAL_MESSAGES: ChatMessage[] = [
@@ -63,13 +67,19 @@ export function ChatInterface({
 
   const appendTokenToAssistant = (token: string) => {
     setMessages((current) => {
-      if (current.length === 0) return current;
+      if (current.length === 0 || current[current.length - 1].role !== "assistant") {
+        return [
+          ...current,
+          {
+            role: "assistant",
+            content: token,
+          },
+        ];
+      }
 
       const next = [...current];
       const lastIndex = next.length - 1;
       const lastMessage = next[lastIndex];
-      if (lastMessage.role !== "assistant") return current;
-
       next[lastIndex] = {
         ...lastMessage,
         content: `${lastMessage.content}${token}`,
@@ -78,19 +88,33 @@ export function ChatInterface({
     });
   };
 
-  const finalizeAssistantMessage = (answer?: string, citations?: Citation[]) => {
+  const finalizeAssistantMessage = (
+    answer?: string,
+    citations?: Citation[],
+    modelUsed?: string,
+  ) => {
     setMessages((current) => {
-      if (current.length === 0) return current;
+      if (current.length === 0 || current[current.length - 1].role !== "assistant") {
+        return [
+          ...current,
+          {
+            role: "assistant",
+            content: answer ?? "",
+            citations,
+            modelUsed,
+          },
+        ];
+      }
 
       const next = [...current];
       const lastIndex = next.length - 1;
       const lastMessage = next[lastIndex];
-      if (lastMessage.role !== "assistant") return current;
 
       next[lastIndex] = {
         ...lastMessage,
         content: answer ?? lastMessage.content,
         citations: citations ?? lastMessage.citations,
+        modelUsed: modelUsed ?? lastMessage.modelUsed,
       };
       return next;
     });
@@ -143,10 +167,6 @@ export function ChatInterface({
       {
         role: "user",
         content: trimmed,
-      },
-      {
-        role: "assistant",
-        content: "",
       },
     ]);
     onSessionUsedChange?.(true);
@@ -220,13 +240,14 @@ export function ChatInterface({
             continue;
           }
 
-          if (parsedEvent.type === "final") {
-            finalizeAssistantMessage(
-              parsedEvent.payload?.answer,
-              parsedEvent.payload?.citations,
-            );
-            continue;
-          }
+            if (parsedEvent.type === "final") {
+              finalizeAssistantMessage(
+                parsedEvent.payload?.answer,
+                parsedEvent.payload?.citations,
+                parsedEvent.payload?.model_used,
+              );
+              continue;
+            }
 
           if (parsedEvent.type === "error") {
             throw new Error(parsedEvent.message ?? "Stream returned an error.");
@@ -309,6 +330,11 @@ export function ChatInterface({
                         );
                       })}
                     </div>
+                  ) : null}
+                  {message.modelUsed ? (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Model: {message.modelUsed}
+                    </p>
                   ) : null}
                 </>
               ) : (

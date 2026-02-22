@@ -70,6 +70,7 @@ Optional:
 
 ```env
 CHUNK_SIZE=1000
+GROQ_MODEL=llama-3.1-8b-instant
 ```
 
 ### 3) Start FastAPI backend

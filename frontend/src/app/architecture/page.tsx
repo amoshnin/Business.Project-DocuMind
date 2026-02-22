@@ -291,7 +291,8 @@ const chapters: Chapter[] = [
   {
     id: "stateless-security-model",
     title: "Chapter 7: Stateless Security and BYOK",
-    subtitle: "Credential control in the browser without server-side secret storage",
+    subtitle:
+      "Credential control in the browser without server-side secret storage",
     icon: LockKeyhole,
     sections: [
       {
@@ -357,7 +358,8 @@ const chapters: Chapter[] = [
   {
     id: "system-resilience",
     title: "Chapter 9: Resilience, Performance, and Operational Discipline",
-    subtitle: "Hardening failure paths while keeping latency and quality predictable",
+    subtitle:
+      "Hardening failure paths while keeping latency and quality predictable",
     icon: LockKeyhole,
     sections: [
       {
@@ -407,7 +409,6 @@ const architecturePrinciples = [
   "Decouple retrieval, embeddings, and generation to preserve runtime flexibility.",
   "Prevent lock-in through provider abstraction and stateless security boundaries.",
   "Optimize for explainability, resilience, and operational clarity.",
-  "Treat UX state machines as part of system correctness, not only visual polish.",
   "Measure quality through repeatable evaluation loops before relying on intuition.",
 ]
 
@@ -446,18 +447,6 @@ const executiveWhatWeBuiltSections = [
       "Server-side logic remains stateless with respect to user secrets.",
       "Provider failure handling is explicit for both OpenAI and Groq paths.",
       "Operating modes remain flexible without divergent product surfaces.",
-    ],
-  },
-  {
-    title: "Operational Discipline",
-    summary:
-      "Reliability is maintained through typed schemas, async boundaries, and quality evaluation loops.",
-    whatBuilt:
-      "The platform includes explicit exception mapping, structured responses, stream-safe parsing, and judge-based regression scoring.",
-    complexity: [
-      "Typed payload and status contracts prevent silent failures.",
-      "Graceful retry and recovery paths preserve user momentum.",
-      "Engineering decisions align with business throughput and trust.",
     ],
   },
 ]

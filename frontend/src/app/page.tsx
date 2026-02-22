@@ -19,10 +19,8 @@ export default function Home() {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [chatSessionKey, setChatSessionKey] = useState(0);
   const [isCurrentSessionUsed, setIsCurrentSessionUsed] = useState(false);
-  const [modelProvider, setModelProvider] = useState<ModelProvider>(() =>
-    getModelProvider(),
-  );
-  const [hasApiKey, setHasApiKey] = useState(() => Boolean(getUserApiKey()));
+  const [modelProvider, setModelProvider] = useState<ModelProvider>("groq");
+  const [hasApiKey, setHasApiKey] = useState(false);
   const [isDocumentReady, setIsDocumentReady] = useState(false);
   const [settingsErrorMessage, setSettingsErrorMessage] = useState<
     string | null
@@ -44,6 +42,15 @@ export default function Home() {
     return () => {
       window.removeEventListener(DOCUMIND_AUTH_ERROR_EVENT, handleAuthError);
     };
+  }, []);
+
+  useEffect(() => {
+    const syncFromStorage = () => {
+      setModelProvider(getModelProvider());
+      setHasApiKey(Boolean(getUserApiKey()));
+    };
+    const syncTimeout = window.setTimeout(syncFromStorage, 0);
+    return () => window.clearTimeout(syncTimeout);
   }, []);
 
   const onSettingsModalChange = (open: boolean) => {
