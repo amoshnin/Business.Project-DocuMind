@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 
 from services.document_processor import process_pdf
 from schemas import ChatRequest, ChatResponse
-from services.llm_chain import generate_answer, stream_answer_tokens
+from services.llm_chain import generate_answer, stream_answer_events
 from services.retriever import (
     add_documents_to_store,
     get_hybrid_retriever,
@@ -75,16 +75,8 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
 
     async def event_generator() -> AsyncIterator[str]:
         try:
-            async for token in stream_answer_tokens(request.query, retrieved_docs):
-                payload = {"type": "token", "token": token}
-                yield f"data: {json.dumps(payload)}\n\n"
-
-            structured_response = await generate_answer(request.query, retrieved_docs)
-            final_payload = {
-                "type": "final",
-                "payload": structured_response.model_dump(mode="json"),
-            }
-            yield f"data: {json.dumps(final_payload)}\n\n"
+            async for event in stream_answer_events(request.query, retrieved_docs):
+                yield f"data: {json.dumps(event)}\n\n"
             yield "data: [DONE]\n\n"
         except Exception as exc:  # pragma: no cover
             error_payload = {"type": "error", "message": str(exc)}
