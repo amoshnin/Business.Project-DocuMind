@@ -1,9 +1,9 @@
-"use client";
+"use client"
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useState } from "react"
 
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import {
   Dialog,
   DialogContent,
@@ -11,51 +11,51 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { getUserApiKey, setUserApiKey } from "@/lib/api-key";
+} from "@/components/ui/dialog"
+import { getUserApiKey, setUserApiKey } from "@/lib/api-key"
 import {
   getModelProvider,
   setModelProvider,
   type ModelProvider,
-} from "@/lib/model-provider";
+} from "@/lib/model-provider"
 
 type SettingsModalProps = {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  errorMessage?: string | null;
-};
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  errorMessage?: string | null
+}
 
 export function SettingsModal({
   open,
   onOpenChange,
   errorMessage,
 }: SettingsModalProps) {
-  const [apiKey, setApiKeyValue] = useState(() => getUserApiKey() ?? "");
+  const [apiKey, setApiKeyValue] = useState(() => getUserApiKey() ?? "")
   const [provider, setProvider] = useState<ModelProvider>(() =>
     getModelProvider(),
-  );
+  )
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (nextOpen) {
-      setApiKeyValue(getUserApiKey() ?? "");
-      setProvider(getModelProvider());
+      setApiKeyValue(getUserApiKey() ?? "")
+      setProvider(getModelProvider())
     }
 
-    onOpenChange(nextOpen);
-  };
+    onOpenChange(nextOpen)
+  }
 
   const saveSettings = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setModelProvider(provider);
+    event.preventDefault()
+    setModelProvider(provider)
 
     if (provider === "openai") {
-      setUserApiKey(apiKey);
+      setUserApiKey(apiKey)
     }
 
-    onOpenChange(false);
-  };
+    onOpenChange(false)
+  }
 
-  const isSaveDisabled = provider === "openai" && !apiKey.trim();
+  const isSaveDisabled = provider === "openai" && !apiKey.trim()
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -114,33 +114,27 @@ export function SettingsModal({
                   browser and never saved on our servers.
                 </p>
               </div>
+              <div className="space-y-2 rounded-md border bg-muted/30 p-3">
+                <p className="text-sm font-medium">Security Configuration</p>
+                <ul className="list-disc space-y-1 pl-4 text-xs text-muted-foreground">
+                  <li>Model preference is saved locally.</li>
+                  <li>
+                    OpenAI keys are saved locally in your browser only and only
+                    sent to OpenAI's API when OpenAI AI Engine is selected.
+                  </li>
+                  <li>
+                    Important Note: We do not store or have access to your
+                    OpenAI API key. It is only used client-side to make requests
+                    directly to OpenAI when that provider is selected.
+                  </li>
+                </ul>
+              </div>
             </>
           )}
 
           {errorMessage ? (
             <p className="text-sm text-destructive">{errorMessage}</p>
           ) : null}
-
-          <div className="space-y-2 rounded-md border bg-muted/30 p-3">
-            <p className="text-sm font-medium">Security Configuration</p>
-            <ul className="list-disc space-y-1 pl-4 text-xs text-muted-foreground">
-              <li>
-                Model preference is saved locally under `DOCUMIND_MODEL_PROVIDER`.
-              </li>
-              <li>
-                OpenAI keys are saved locally under `DOCUMIND_USER_KEY` and only
-                sent when OpenAI is selected.
-              </li>
-              <li>
-                Requests include `X-Model-Provider`; `X-OpenAI-Key` is attached
-                only for OpenAI mode.
-              </li>
-              <li>
-                On `401 Unauthorized`, credentials are cleared and this modal is
-                reopened automatically.
-              </li>
-            </ul>
-          </div>
 
           <DialogFooter>
             <Button
@@ -157,5 +151,5 @@ export function SettingsModal({
         </form>
       </DialogContent>
     </Dialog>
-  );
+  )
 }
