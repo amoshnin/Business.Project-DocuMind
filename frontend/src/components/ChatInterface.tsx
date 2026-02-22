@@ -14,6 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { submitQuery } from "@/lib/chat-api";
 import { cn } from "@/lib/utils";
 
 export type Citation = {
@@ -31,6 +32,11 @@ type ChatMessage = {
   citations?: Citation[];
 };
 
+type ChatStreamEvent =
+  | { type: "token"; token?: string }
+  | { type: "final"; payload?: { answer?: string; citations?: Citation[] } }
+  | { type: "error"; message?: string };
+
 const INITIAL_MESSAGES: ChatMessage[] = [
   {
     role: "assistant",
@@ -43,11 +49,84 @@ export function ChatInterface() {
   const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
   const [draft, setDraft] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  const appendTokenToAssistant = (token: string) => {
+    setMessages((current) => {
+      if (current.length === 0) return current;
+
+      const next = [...current];
+      const lastIndex = next.length - 1;
+      const lastMessage = next[lastIndex];
+      if (lastMessage.role !== "assistant") return current;
+
+      next[lastIndex] = {
+        ...lastMessage,
+        content: `${lastMessage.content}${token}`,
+      };
+      return next;
+    });
+  };
+
+  const finalizeAssistantMessage = (answer?: string, citations?: Citation[]) => {
+    setMessages((current) => {
+      if (current.length === 0) return current;
+
+      const next = [...current];
+      const lastIndex = next.length - 1;
+      const lastMessage = next[lastIndex];
+      if (lastMessage.role !== "assistant") return current;
+
+      next[lastIndex] = {
+        ...lastMessage,
+        content: answer ?? lastMessage.content,
+        citations: citations ?? lastMessage.citations,
+      };
+      return next;
+    });
+  };
+
+  const appendAssistantError = (message: string) => {
+    setMessages((current) => {
+      if (current.length === 0) {
+        return [
+          ...current,
+          {
+            role: "assistant",
+            content: `**Error:** ${message}`,
+          },
+        ];
+      }
+
+      const next = [...current];
+      const lastIndex = next.length - 1;
+      const lastMessage = next[lastIndex];
+
+      if (lastMessage.role !== "assistant") {
+        return [
+          ...current,
+          {
+            role: "assistant",
+            content: `**Error:** ${message}`,
+          },
+        ];
+      }
+
+      next[lastIndex] = {
+        ...lastMessage,
+        content:
+          lastMessage.content.trim().length > 0
+            ? `${lastMessage.content}\n\n**Error:** ${message}`
+            : `**Error:** ${message}`,
+      };
+      return next;
+    });
+  };
 
   const sendMessage = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmed = draft.trim();
-    if (!trimmed || isTyping) return;
+    if (!trimmed || isGenerating) return;
 
     setMessages((current) => [
       ...current,
@@ -55,21 +134,101 @@ export function ChatInterface() {
         role: "user",
         content: trimmed,
       },
+      {
+        role: "assistant",
+        content: "",
+      },
     ]);
     setDraft("");
     setIsTyping(true);
+    setIsGenerating(true);
 
-    await new Promise((resolve) => setTimeout(resolve, 900));
+    let hasReceivedFirstByte = false;
 
-    setMessages((current) => [
-      ...current,
-      {
-        role: "assistant",
-        content:
-          "Generating response stream. This placeholder will be replaced by live SSE tokens in the next batch.",
-      },
-    ]);
-    setIsTyping(false);
+    try {
+      const response = await submitQuery(trimmed);
+      const reader = response.body?.getReader();
+
+      if (!reader) {
+        throw new Error("Streaming is not available in this browser.");
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let shouldStop = false;
+
+      while (!shouldStop) {
+        const { value, done } = await reader.read();
+        if (done) {
+          buffer += decoder.decode();
+          shouldStop = true;
+        } else {
+          buffer += decoder.decode(value, { stream: true });
+        }
+
+        let separatorIndex = buffer.indexOf("\n\n");
+        while (separatorIndex !== -1) {
+          const rawEvent = buffer.slice(0, separatorIndex).trim();
+          buffer = buffer.slice(separatorIndex + 2);
+          separatorIndex = buffer.indexOf("\n\n");
+
+          if (!rawEvent) {
+            continue;
+          }
+
+          const dataPayload = rawEvent
+            .split("\n")
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => line.slice(5).trimStart())
+            .join("\n");
+
+          if (!dataPayload) {
+            continue;
+          }
+
+          if (dataPayload === "[DONE]") {
+            shouldStop = true;
+            break;
+          }
+
+          let parsedEvent: ChatStreamEvent;
+          try {
+            parsedEvent = JSON.parse(dataPayload) as ChatStreamEvent;
+          } catch {
+            continue;
+          }
+
+          if (!hasReceivedFirstByte) {
+            hasReceivedFirstByte = true;
+            setIsTyping(false);
+          }
+
+          if (parsedEvent.type === "token" && parsedEvent.token) {
+            appendTokenToAssistant(parsedEvent.token);
+            continue;
+          }
+
+          if (parsedEvent.type === "final") {
+            finalizeAssistantMessage(
+              parsedEvent.payload?.answer,
+              parsedEvent.payload?.citations,
+            );
+            continue;
+          }
+
+          if (parsedEvent.type === "error") {
+            throw new Error(parsedEvent.message ?? "Stream returned an error.");
+          }
+        }
+      }
+    } catch (error) {
+      appendAssistantError(
+        error instanceof Error ? error.message : "Unexpected stream failure.",
+      );
+    } finally {
+      setIsTyping(false);
+      setIsGenerating(false);
+    }
   };
 
   return (
@@ -141,7 +300,7 @@ export function ChatInterface() {
             type="submit"
             size="icon"
             aria-label="Send message"
-            disabled={!draft.trim() || isTyping}
+            disabled={!draft.trim() || isGenerating}
           >
             <Send className="size-4" />
           </Button>
