@@ -2,10 +2,10 @@ import json
 from collections.abc import AsyncIterator
 from typing import Any
 
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.documents import Document
 from langchain_core.messages import BaseMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, ValidationError
 
 from schemas import ChatResponse, Citation
@@ -117,7 +117,7 @@ _reformulation_prompt = ChatPromptTemplate.from_messages(
 
 
 async def generate_answer(
-    query: str, retrieved_docs: list[Document], llm: ChatOpenAI
+    query: str, retrieved_docs: list[Document], llm: BaseChatModel
 ) -> ChatResponse:
     context = _format_context(retrieved_docs)
     structured_llm = llm.with_structured_output(ChatResponse, method="function_calling")
@@ -154,7 +154,7 @@ def _extract_text_from_chunk(chunk: Any) -> str:
 
 
 async def reformulate_query(
-    raw_query: str, chat_history: list[BaseMessage], llm: ChatOpenAI
+    raw_query: str, chat_history: list[BaseMessage], llm: BaseChatModel
 ) -> str:
     if not chat_history:
         return raw_query
@@ -220,7 +220,7 @@ async def stream_answer_events(
     query: str,
     retrieved_docs: list[Document],
     chat_history: list[BaseMessage],
-    llm: ChatOpenAI,
+    llm: BaseChatModel,
 ) -> AsyncIterator[dict[str, Any]]:
     context = _format_context(retrieved_docs)
     tool_llm = llm.bind_tools([CitationTool])

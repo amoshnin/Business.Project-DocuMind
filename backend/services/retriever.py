@@ -1,6 +1,6 @@
 import asyncio
-from uuid import uuid4
 from typing import Any
+from uuid import uuid4
 
 try:
     from langchain.retrievers import EnsembleRetriever
@@ -13,11 +13,8 @@ try:
     from langchain_community.retrievers import BM25Retriever
 except ImportError:  # pragma: no cover
     from langchain.retrievers import BM25Retriever
+from langchain_core.embeddings import Embeddings
 from langchain_core.documents import Document
-try:
-    from langchain_openai import OpenAIEmbeddings
-except ImportError:  # pragma: no cover
-    from langchain.embeddings import OpenAIEmbeddings
 
 try:
     from langchain_chroma import Chroma
@@ -33,7 +30,7 @@ _bm25_documents: list[Document] = []
 _settings = get_settings()
 
 
-def _new_vector_store(embeddings: OpenAIEmbeddings | None = None) -> Chroma:
+def _new_vector_store(embeddings: Embeddings | None = None) -> Chroma:
     kwargs: dict[str, Any] = {
         "collection_name": "documind",
         "persist_directory": _settings.chroma_persist_dir,
@@ -44,7 +41,7 @@ def _new_vector_store(embeddings: OpenAIEmbeddings | None = None) -> Chroma:
     return Chroma(**kwargs)
 
 
-def _add_documents(chunks: list[Document], embeddings: OpenAIEmbeddings) -> None:
+def _add_documents(chunks: list[Document], embeddings: Embeddings) -> None:
     if not chunks:
         return
 
@@ -66,13 +63,13 @@ def _add_documents(chunks: list[Document], embeddings: OpenAIEmbeddings) -> None
 
 
 async def add_documents_to_store(
-    chunks: list[Document], embeddings: OpenAIEmbeddings
+    chunks: list[Document], embeddings: Embeddings
 ) -> None:
     await asyncio.to_thread(_add_documents, chunks, embeddings)
 
 
 def _build_hybrid_retriever(
-    embeddings: OpenAIEmbeddings,
+    embeddings: Embeddings,
 ) -> EnsembleRetriever | None:
     if not _bm25_documents:
         return None
@@ -88,7 +85,7 @@ def _build_hybrid_retriever(
 
 
 def get_hybrid_retriever(
-    chunks_for_bm25: list[Document], embeddings: OpenAIEmbeddings
+    chunks_for_bm25: list[Document], embeddings: Embeddings
 ) -> EnsembleRetriever:
     if chunks_for_bm25:
         _bm25_documents.extend(chunks_for_bm25)
@@ -138,7 +135,7 @@ async def initialize_retriever_from_disk() -> None:
     await asyncio.to_thread(_initialize_retriever_from_disk)
 
 
-def _retrieve_documents(query: str, embeddings: OpenAIEmbeddings) -> list[Document]:
+def _retrieve_documents(query: str, embeddings: Embeddings) -> list[Document]:
     retriever = _build_hybrid_retriever(embeddings)
     if retriever is None:
         raise RuntimeError("Hybrid retriever is not initialized. Upload documents first.")
@@ -146,6 +143,6 @@ def _retrieve_documents(query: str, embeddings: OpenAIEmbeddings) -> list[Docume
 
 
 async def retrieve_documents(
-    query: str, embeddings: OpenAIEmbeddings
+    query: str, embeddings: Embeddings
 ) -> list[Document]:
     return await asyncio.to_thread(_retrieve_documents, query, embeddings)
