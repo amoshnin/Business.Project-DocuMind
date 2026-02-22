@@ -57,6 +57,8 @@ export default function Home() {
 
   const requiresOpenAIKey = modelProvider === "openai";
   const canSendMessages = (requiresOpenAIKey ? hasApiKey : true) && isDocumentReady;
+  const selectedEngineLabel =
+    modelProvider === "openai" ? "OpenAI · GPT-4o" : "Groq · Llama 3";
 
   const chatBlockedReason =
     requiresOpenAIKey && !hasApiKey && !isDocumentReady
@@ -87,6 +89,9 @@ export default function Home() {
             <div className="flex items-center gap-3">
               <span className="hidden text-xs text-muted-foreground lg:inline">
                 Lead Software Engineer: Artem Moshnin
+              </span>
+              <span className="hidden items-center rounded-md border bg-muted/40 px-2.5 py-1 text-xs font-medium text-muted-foreground sm:inline-flex">
+                Engine: {selectedEngineLabel}
               </span>
               <Button
                 variant="outline"

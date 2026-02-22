@@ -14,10 +14,14 @@ from langchain_openai import ChatOpenAI
 try:
     from openai import (
         AuthenticationError as OpenAIAuthenticationError,
+        BadRequestError as OpenAIBadRequestError,
         RateLimitError as OpenAIRateLimitError,
     )
 except Exception:  # pragma: no cover
     class OpenAIAuthenticationError(Exception):
+        pass
+
+    class OpenAIBadRequestError(Exception):
         pass
 
     class OpenAIRateLimitError(Exception):
@@ -59,6 +63,9 @@ PROVIDER_OPENAI = "openai"
 INVALID_KEY_DETAIL = "Invalid or expired OpenAI API Key"
 GROQ_RATE_LIMIT_DETAIL = (
     "Groq is rate-limited right now. Please wait a minute or switch to OpenAI."
+)
+GROQ_MODEL_UNAVAILABLE_DETAIL = (
+    "The configured Groq model is unavailable. Set a supported `GROQ_MODEL` and retry."
 )
 
 
@@ -106,17 +113,33 @@ def get_llm(provider: str, openai_key: str | None = None) -> BaseChatModel:
 
     if ChatGroq is None:
         return ChatOpenAI(
-            model="llama3-8b-8192",
+            model=settings.groq_model,
             temperature=0,
             api_key=settings.groq_api_key,
             base_url="https://api.groq.com/openai/v1",
         )
 
     return ChatGroq(
-        model_name="llama3-8b-8192",
+        model_name=settings.groq_model,
         temperature=0,
         groq_api_key=settings.groq_api_key,
     )
+
+
+def map_provider_error(exc: Exception) -> HTTPException | None:
+    if isinstance(exc, OpenAIAuthenticationError):
+        return HTTPException(status_code=401, detail=INVALID_KEY_DETAIL)
+
+    if isinstance(exc, (GroqRateLimitError, OpenAIRateLimitError)):
+        return HTTPException(status_code=429, detail=GROQ_RATE_LIMIT_DETAIL)
+
+    if isinstance(exc, OpenAIBadRequestError):
+        detail = str(exc)
+        if "model" in detail.lower() and "decommission" in detail.lower():
+            return HTTPException(status_code=503, detail=GROQ_MODEL_UNAVAILABLE_DETAIL)
+        return HTTPException(status_code=400, detail=detail)
+
+    return None
 
 
 @lru_cache
@@ -141,7 +164,11 @@ session_store: dict[str, list[BaseMessage]] = {}
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -195,22 +222,29 @@ async def chat(
     embeddings = get_embeddings_model()
     try:
         llm = get_llm(provider, openai_key)
-    except OpenAIAuthenticationError as exc:
-        raise HTTPException(status_code=401, detail=INVALID_KEY_DETAIL) from exc
+    except Exception as exc:
+        mapped_error = map_provider_error(exc)
+        if mapped_error:
+            raise mapped_error from exc
+        raise
 
     try:
         retrieved_docs = await retrieve_documents(request.query, embeddings)
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except OpenAIAuthenticationError as exc:
-        raise HTTPException(status_code=401, detail=INVALID_KEY_DETAIL) from exc
+    except Exception as exc:
+        mapped_error = map_provider_error(exc)
+        if mapped_error:
+            raise mapped_error from exc
+        raise
 
     try:
         return await generate_answer(request.query, retrieved_docs, llm)
-    except OpenAIAuthenticationError as exc:
-        raise HTTPException(status_code=401, detail=INVALID_KEY_DETAIL) from exc
-    except (GroqRateLimitError, OpenAIRateLimitError) as exc:
-        raise HTTPException(status_code=429, detail=GROQ_RATE_LIMIT_DETAIL) from exc
+    except Exception as exc:
+        mapped_error = map_provider_error(exc)
+        if mapped_error:
+            raise mapped_error from exc
+        raise
 
 
 @app.post("/process")
@@ -227,8 +261,11 @@ async def chat_stream(
     try:
         reformulation_llm = get_llm(provider, openai_key)
         stream_llm = get_llm(provider, openai_key)
-    except OpenAIAuthenticationError as exc:
-        raise HTTPException(status_code=401, detail=INVALID_KEY_DETAIL) from exc
+    except Exception as exc:
+        mapped_error = map_provider_error(exc)
+        if mapped_error:
+            raise mapped_error from exc
+        raise
 
     try:
         if chat_history:
@@ -241,10 +278,11 @@ async def chat_stream(
         retrieved_docs = await retrieve_documents(retrieval_query, embeddings)
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except OpenAIAuthenticationError as exc:
-        raise HTTPException(status_code=401, detail=INVALID_KEY_DETAIL) from exc
-    except (GroqRateLimitError, OpenAIRateLimitError) as exc:
-        raise HTTPException(status_code=429, detail=GROQ_RATE_LIMIT_DETAIL) from exc
+    except Exception as exc:
+        mapped_error = map_provider_error(exc)
+        if mapped_error:
+            raise mapped_error from exc
+        raise
 
     stream_events = stream_answer_events(
         query=request.query,
@@ -257,10 +295,11 @@ async def chat_stream(
         first_event = await anext(stream_events)
     except StopAsyncIteration:
         first_event = {"type": "final", "payload": {"answer": "", "citations": []}}
-    except OpenAIAuthenticationError as exc:
-        raise HTTPException(status_code=401, detail=INVALID_KEY_DETAIL) from exc
-    except (GroqRateLimitError, OpenAIRateLimitError) as exc:
-        raise HTTPException(status_code=429, detail=GROQ_RATE_LIMIT_DETAIL) from exc
+    except Exception as exc:
+        mapped_error = map_provider_error(exc)
+        if mapped_error:
+            raise mapped_error from exc
+        raise
 
     async def event_generator() -> AsyncIterator[str]:
         final_answer = ""
@@ -287,12 +326,12 @@ async def chat_stream(
             history.append(HumanMessage(content=request.query))
             history.append(AIMessage(content=final_answer))
             yield "data: [DONE]\n\n"
-        except OpenAIAuthenticationError:
-            error_payload = {"detail": INVALID_KEY_DETAIL}
-            yield f"data: {json.dumps(error_payload)}\n\n"
-        except (GroqRateLimitError, OpenAIRateLimitError):
-            error_payload = {"detail": GROQ_RATE_LIMIT_DETAIL}
-            yield f"data: {json.dumps(error_payload)}\n\n"
+        except Exception as exc:
+            mapped_error = map_provider_error(exc)
+            if mapped_error:
+                error_payload = {"detail": mapped_error.detail}
+                yield f"data: {json.dumps(error_payload)}\n\n"
+                return
         except Exception as exc:  # pragma: no cover
             error_payload = {"type": "error", "message": str(exc)}
             yield f"data: {json.dumps(error_payload)}\n\n"
