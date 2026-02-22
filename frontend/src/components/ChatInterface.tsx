@@ -44,11 +44,15 @@ const INITIAL_MESSAGES: ChatMessage[] = [
 type ChatInterfaceProps = {
   activeCitation: Citation | null;
   onActiveCitationChange: (citation: Citation | null) => void;
+  canSendMessages: boolean;
+  blockedReason: string | null;
 };
 
 export function ChatInterface({
   activeCitation,
   onActiveCitationChange,
+  canSendMessages,
+  blockedReason,
 }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
   const [draft, setDraft] = useState("");
@@ -130,7 +134,7 @@ export function ChatInterface({
   const sendMessage = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmed = draft.trim();
-    if (!trimmed || isGenerating) return;
+    if (!trimmed || isGenerating || !canSendMessages) return;
 
     setMessages((current) => [
       ...current,
@@ -323,18 +327,26 @@ export function ChatInterface({
           <Input
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            placeholder="Ask about the active document..."
+            placeholder={
+              canSendMessages
+                ? "Ask about the active document..."
+                : "Configure access to unlock chat..."
+            }
             aria-label="Message input"
+            disabled={!canSendMessages || isGenerating}
           />
           <Button
             type="submit"
             size="icon"
             aria-label="Send message"
-            disabled={!draft.trim() || isGenerating}
+            disabled={!draft.trim() || isGenerating || !canSendMessages}
           >
             <Send className="size-4" />
           </Button>
         </div>
+        {blockedReason ? (
+          <p className="mt-2 text-xs text-muted-foreground">{blockedReason}</p>
+        ) : null}
       </form>
     </Card>
   );

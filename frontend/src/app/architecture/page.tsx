@@ -1,4 +1,5 @@
-import { BookOpenText, GitBranch, LockKeyhole, Rocket, Search } from "lucide-react";
+import Link from "next/link";
+import { ArrowLeft, BookOpenText, GitBranch, LockKeyhole, Rocket, Search } from "lucide-react";
 import { type ComponentType } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -246,6 +247,81 @@ const architecturePrinciples = [
   "Optimize for explainability before raw throughput.",
 ];
 
+const executiveWhatWeBuiltSections = [
+  {
+    title: "The 'Power Grid' Analogy",
+    summary:
+      "OpenAI is the power plant. DocuMind is the electrical grid, transformer stations, and smart-home wiring that turn raw intelligence into dependable business utility.",
+    whatBuilt:
+      "Artem Moshnin architected the orchestration layer that prepares private PDFs, routes the right evidence into each answer, and returns outputs with audit-ready citations.",
+    complexity: [
+      "OpenAI does not natively ingest, index, and search your private 100-page documents as a reusable knowledge system.",
+      "DocuMind handles the full utility infrastructure: ingestion, indexing, retrieval fusion, grounding rules, and citation UX.",
+      "Result: the model becomes operationally useful, not just generally intelligent.",
+    ],
+  },
+  {
+    title: "1) Retrieval Intelligence (The Library vs. The Book)",
+    summary:
+      "A base model may be brilliant, but it has not read your exact PDF in an optimized way for each question.",
+    whatBuilt:
+      "DocuMind implements a Hybrid Ensemble Retriever: it chunks documents, stores them in a vector store, runs BM25 keyword retrieval and semantic retrieval, then fuses rankings with RRF to return the highest-value evidence slices.",
+    complexity: [
+      "This is the difference between searching 10,000 paragraphs blindly vs. finding the three paragraphs that actually answer the question.",
+      "Keyword retrieval protects exact legal and policy terms; semantic retrieval captures conceptual phrasing and paraphrases.",
+      "RRF gives stable merged ranking instead of brittle single-retriever behavior.",
+    ],
+  },
+  {
+    title: "2) Data Pipeline (ETL for Documents)",
+    summary:
+      "OpenAI understands text tokens, not raw PDF structure. Enterprise documents must be transformed before they can be queried reliably.",
+    whatBuilt:
+      "DocuMind ships an ETL pipeline: PDF extraction, text normalization, recursive splitting, metadata enrichment, and chunk persistence for repeatable retrieval.",
+    complexity: [
+      "Chunk size and overlap are product decisions, not defaults; they control answer coherence vs. precision.",
+      "Overlap preserves meaning across boundaries so clauses do not break mid-thought.",
+      "This pipeline is what turns 'file upload' into production-grade knowledge preparation.",
+    ],
+  },
+  {
+    title: "3) Stateful UX + Stateless Security",
+    summary:
+      "OpenAI offers an API endpoint. It does not provide the end-user platform behavior enterprises require.",
+    whatBuilt:
+      "DocuMind provides a BYOK security model with sessioned chat experience: the key is controlled by the user, injected per request, and never persisted in DocuMind databases.",
+    complexity: [
+      "Key flow is explicit: browser local storage -> encrypted request header -> FastAPI dependency validation -> volatile runtime usage.",
+      "On `401`, the key is auto-cleared and the settings modal is reopened, preventing silent auth drift.",
+      "Users get continuous multi-turn conversation while security remains stateless at the credential layer.",
+    ],
+  },
+  {
+    title: "4) Prompt Engineering + Context Stuffing",
+    summary:
+      "Passing raw text to a model is not enough. The model needs structured, prioritized context and strict behavioral constraints.",
+    whatBuilt:
+      "DocuMind orchestrates prompt contracts that force document-grounded answers with citation requirements, while stuffing only top-retrieved chunks into the context window.",
+    complexity: [
+      "This prevents 'confident guessing' by making evidence attachment a first-class output requirement.",
+      "Context window budget is managed deliberately so the model focuses on highest-signal chunks.",
+      "Streaming answer generation is paired with structured citation finalization for trust and speed.",
+    ],
+  },
+  {
+    title: "Business ROI and Product Outcome",
+    summary:
+      "DocuMind converts raw model capability into measurable business outcomes, not just impressive demos.",
+    whatBuilt:
+      "Artem Moshnin designed DocuMind as a product architecture: security posture, retrieval precision, explainability, and operator UX aligned to enterprise decision workflows.",
+    complexity: [
+      "Typical impact target: up to 90% reduction in manual review time for long-form technical/legal documents.",
+      "Citation grounding materially lowers hallucination risk on critical business decisions.",
+      "BYOK gives cost control and procurement-friendly ownership of model spend.",
+    ],
+  },
+];
+
 export default function ArchitecturePage() {
   return (
     <div className="min-h-dvh bg-background">
@@ -257,6 +333,12 @@ export default function ArchitecturePage() {
               <CardDescription className="text-xs">
                 Lead Architect: Artem Moshnin
               </CardDescription>
+              <Button asChild variant="default" size="sm" className="mt-1">
+                <Link href="/">
+                  <ArrowLeft className="size-4" />
+                  Return to Dashboard
+                </Link>
+              </Button>
             </CardHeader>
             <Separator />
             <ScrollArea className="min-h-0 flex-1">
@@ -264,12 +346,21 @@ export default function ArchitecturePage() {
                 <Button asChild variant="ghost" className="w-full justify-start">
                   <a href="#executive-summary">Executive Summary</a>
                 </Button>
+                <Button
+                  asChild
+                  variant="ghost"
+                  className="h-auto w-full justify-start whitespace-normal break-words py-2 text-left leading-snug"
+                >
+                  <a href="#executive-summary-what-we-built">
+                    The Executive Summary: What We Actually Built.
+                  </a>
+                </Button>
                 {chapters.map((chapter) => (
                   <Button
                     key={chapter.id}
                     asChild
                     variant="ghost"
-                    className="h-auto w-full justify-start py-2 text-left"
+                    className="h-auto w-full justify-start whitespace-normal break-words py-2 text-left leading-snug"
                   >
                     <a href={`#${chapter.id}`}>{chapter.title}</a>
                   </Button>
@@ -280,6 +371,17 @@ export default function ArchitecturePage() {
         </aside>
 
         <div className="space-y-6">
+          <div className="sticky top-3 z-20 lg:hidden">
+            <Card className="border-primary/20 bg-card/95 p-2 backdrop-blur supports-[backdrop-filter]:bg-card/85">
+              <Button asChild variant="default" className="w-full justify-center">
+                <Link href="/">
+                  <ArrowLeft className="size-4" />
+                  Return to Dashboard
+                </Link>
+              </Button>
+            </Card>
+          </div>
+
           <Card id="executive-summary" className="scroll-mt-24">
             <CardHeader>
               <CardTitle className="text-2xl">
@@ -306,6 +408,63 @@ export default function ArchitecturePage() {
                   >
                     {principle}
                   </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card
+            id="executive-summary-what-we-built"
+            className="scroll-mt-24 border-primary/20"
+          >
+            <CardHeader>
+              <CardTitle className="text-2xl">
+                The Executive Summary: What We Actually Built.
+              </CardTitle>
+              <CardDescription>
+                Product framing for technical recruiters, leadership, and
+                business stakeholders.
+              </CardDescription>
+            </CardHeader>
+            <Separator />
+            <CardContent className="space-y-4 pt-6">
+              <p className="text-sm leading-7 text-muted-foreground">
+                DocuMind is the operational layer that turns raw model
+                intelligence into enterprise-grade decision support. It answers
+                the core business question directly: if OpenAI is the model,
+                DocuMind is the product system that makes that model useful,
+                auditable, secure, and ROI-positive in real document workflows.
+              </p>
+              <p className="rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm leading-7 text-muted-foreground">
+                Without this architecture, sending a 50-page PDF directly to a
+                model is often fragile, costly, and hard to trust. DocuMind
+                exists to solve that operational gap.
+              </p>
+              <div className="grid gap-4">
+                {executiveWhatWeBuiltSections.map((section) => (
+                  <Card
+                    key={section.title}
+                    className="border-muted-foreground/20 bg-muted/20 shadow-none"
+                  >
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-base">{section.title}</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <p className="text-sm leading-7 text-muted-foreground">
+                        {section.summary}
+                      </p>
+                      <p className="text-sm leading-7 text-muted-foreground">
+                        {section.whatBuilt}
+                      </p>
+                      <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+                        {section.complexity.map((point, pointIndex) => (
+                          <li key={`${section.title}-complexity-${pointIndex}`}>
+                            {point}
+                          </li>
+                        ))}
+                      </ul>
+                    </CardContent>
+                  </Card>
                 ))}
               </div>
             </CardContent>

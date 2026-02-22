@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bot, Settings, Sparkles } from "lucide-react";
+import Link from "next/link";
+import { Bot, BookOpenText, Settings, Sparkles } from "lucide-react";
 
 import { ChatInterface } from "@/components/ChatInterface";
 import { DocumentPanel } from "@/components/DocumentPanel";
@@ -9,11 +10,18 @@ import { SettingsModal } from "@/components/SettingsModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { DOCUMIND_AUTH_ERROR_EVENT } from "@/lib/api-client";
+import { getUserApiKey } from "@/lib/api-key";
 import { Citation } from "@/lib/citations";
+import { getModelProvider, type ModelProvider } from "@/lib/model-provider";
 
 export default function Home() {
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [modelProvider, setModelProvider] = useState<ModelProvider>(() =>
+    getModelProvider(),
+  );
+  const [hasApiKey, setHasApiKey] = useState(() => Boolean(getUserApiKey()));
+  const [isDocumentReady, setIsDocumentReady] = useState(false);
   const [settingsErrorMessage, setSettingsErrorMessage] = useState<
     string | null
   >(null);
@@ -23,8 +31,10 @@ export default function Home() {
       const customEvent = event as CustomEvent<{ message?: string }>;
       setSettingsErrorMessage(
         customEvent.detail?.message ??
-          "Unauthorized request. Please update your API key.",
+          "Unauthorized request. Please review AI Engine settings.",
       );
+      setModelProvider(getModelProvider());
+      setHasApiKey(false);
       setIsSettingsModalOpen(true);
     };
 
@@ -38,8 +48,22 @@ export default function Home() {
     setIsSettingsModalOpen(open);
     if (!open) {
       setSettingsErrorMessage(null);
+      setModelProvider(getModelProvider());
+      setHasApiKey(Boolean(getUserApiKey()));
     }
   };
+
+  const requiresOpenAIKey = modelProvider === "openai";
+  const canSendMessages = (requiresOpenAIKey ? hasApiKey : true) && isDocumentReady;
+
+  const chatBlockedReason =
+    requiresOpenAIKey && !hasApiKey && !isDocumentReady
+      ? "OpenAI is selected. Add your API key and upload a PDF to continue."
+      : requiresOpenAIKey && !hasApiKey
+        ? "OpenAI is selected. Add your API key in Settings to continue."
+        : !isDocumentReady
+          ? "Upload a PDF document before sending questions."
+          : null;
 
   return (
     <div className="h-dvh overflow-hidden bg-background">
@@ -65,7 +89,13 @@ export default function Home() {
                 }}
               >
                 <Settings className="size-4" />
-                API Key
+                AI Engine
+              </Button>
+              <Button asChild variant="outline" size="sm">
+                <Link href="/architecture">
+                  <BookOpenText className="size-4" />
+                  Architecture
+                </Link>
               </Button>
               <Button variant="outline" size="sm">
                 <Sparkles className="size-4" />
@@ -80,8 +110,13 @@ export default function Home() {
           <ChatInterface
             activeCitation={activeCitation}
             onActiveCitationChange={setActiveCitation}
+            canSendMessages={canSendMessages}
+            blockedReason={chatBlockedReason}
           />
-          <DocumentPanel activeCitation={activeCitation} />
+          <DocumentPanel
+            activeCitation={activeCitation}
+            onDocumentReadyChange={setIsDocumentReady}
+          />
         </main>
         <SettingsModal
           open={isSettingsModalOpen}
