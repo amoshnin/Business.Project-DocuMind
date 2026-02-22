@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "next/link"
 import {
   ArrowLeft,
   BookOpenText,
@@ -6,196 +6,253 @@ import {
   Rocket,
   Search,
   Shuffle,
-} from "lucide-react";
-import { type ComponentType } from "react";
+} from "lucide-react"
+import { type ComponentType } from "react"
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/ui/button"
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
+} from "@/components/ui/card"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Separator } from "@/components/ui/separator"
 
 type ChapterSection = {
-  heading: string;
-  paragraphs: string[];
-  bullets?: string[];
+  heading: string
+  paragraphs: string[]
+  bullets?: string[]
   alert?: {
-    title: string;
-    body: string;
-  };
+    title: string
+    body: string
+  }
   table?: {
-    columns: string[];
-    rows: string[][];
-  };
-};
+    columns: string[]
+    rows: string[][]
+  }
+}
 
 type Chapter = {
-  id: string;
-  title: string;
-  subtitle: string;
-  icon: ComponentType<{ className?: string }>;
-  sections: ChapterSection[];
-};
+  id: string
+  title: string
+  subtitle: string
+  icon: ComponentType<{ className?: string }>
+  sections: ChapterSection[]
+}
 
 const chapters: Chapter[] = [
   {
-    id: "hybrid-retrieval-logic",
-    title: "Chapter 1: Hybrid Retrieval Logic",
-    subtitle: "Why lexical + semantic retrieval remains the foundation",
+    id: "end-to-end-runtime",
+    title: "Chapter 1: End-to-End Runtime Flow",
+    subtitle: "I explain every request path from UI to model and back",
     icon: Search,
     sections: [
       {
-        heading: "1.1 Why Hybrid Retrieval Still Matters in a Vendor-Agnostic Stack",
+        heading: "1.1 I start with a strict ingestion entrypoint",
         paragraphs: [
-          "Vendor-agnostic generation does not remove the core retrieval problem: business users ask precise questions, and the system must fetch the right evidence from long documents quickly and reliably.",
-          "DocuMind keeps a Hybrid Ensemble Retriever: BM25 for exact lexical anchors and dense vector retrieval for semantic similarity. This protects both precision and recall under real enterprise query variance.",
+          "I accept PDF uploads through `/api/v1/documents/upload`, and I validate provider context before I process any file bytes.",
+          "I require `X-Model-Provider` on every call, and I enforce provider-specific constraints through FastAPI dependencies so invalid auth states fail early.",
+          "I reject empty payloads and missing filenames immediately, and I keep failure semantics explicit with typed HTTP status codes.",
+        ],
+        bullets: [
+          "I validate provider selection in `get_model_provider` before endpoint logic runs.",
+          "I validate OpenAI key format in `get_provider_context` before I allow OpenAI requests.",
+          "I keep Groq server key checks centralized so runtime misconfiguration fails predictably.",
         ],
       },
       {
-        heading: "1.2 Reciprocal Rank Fusion (RRF) as the Merge Strategy",
+        heading: "1.2 I execute the conversational path as a streaming pipeline",
         paragraphs: [
-          "Dense and lexical retrievers produce different ranking profiles. RRF combines them in a rank-stable way so one branch does not dominate due to score-scale differences.",
+          "I handle chat queries through `/api/v1/chat/stream`, and I require a stable `session_id` plus `query` in the request body.",
+          "I optionally reformulate follow-up questions against prior chat history, and I run retrieval before I start token generation.",
+          "I stream events as SSE packets so users see real-time token output and do not wait for full completion.",
         ],
         bullets: [
-          "Dense retriever (`k=3`) and BM25 retriever (`k=3`) are fused in the ensemble layer.",
-          "Balanced weights keep behavior predictable while telemetry matures.",
-          "Result: fewer catastrophic misses on exact terms without sacrificing conceptual matching.",
+          "I emit `token` events for incremental answer text.",
+          "I emit a final `final` event with full answer and citation payload.",
+          "I terminate streams with `[DONE]` so the client state machine closes cleanly.",
+        ],
+      },
+      {
+        heading: "1.3 I close each stream with deterministic state updates",
+        paragraphs: [
+          "I preserve the final assistant answer string on the backend while streaming, and I append the final user and assistant turns to `session_store` after completion.",
+          "I keep this order intentional because I want reformulation on the next turn to use stable finalized content instead of partial token buffers.",
+          "I treat this stream lifecycle as a contract between backend orchestration and frontend rendering, and I avoid hidden side effects outside that contract.",
+        ],
+      },
+    ],
+  },
+  {
+    id: "hybrid-retrieval-logic",
+    title: "Chapter 2: Hybrid Retrieval Logic",
+    subtitle: "I combine lexical and semantic search with rank fusion",
+    icon: Search,
+    sections: [
+      {
+        heading: "2.1 I split retrieval responsibilities by failure mode",
+        paragraphs: [
+          "I use BM25 to catch strict lexical anchors such as exact clauses, IDs, and policy terms that dense search can miss.",
+          "I use dense vector retrieval to capture conceptual similarity when user phrasing differs from source wording.",
+          "I combine both because enterprise documents fail in both directions, and I want high recall without sacrificing precision.",
+        ],
+      },
+      {
+        heading: "2.2 I merge candidate lists with Reciprocal Rank Fusion",
+        paragraphs: [
+          "I avoid direct score mixing because BM25 and dense scores live on different numeric scales and drift under corpus changes.",
+          "I use `EnsembleRetriever` with balanced weights so ranking is position-aware rather than raw-score fragile.",
+          "I treat this as a production safety choice because rank fusion stays stable when models, corpora, or tokenization behaviors evolve.",
+        ],
+        bullets: [
+          "I run dense retrieval at `k=3` from Chroma for fast semantic candidates.",
+          "I run BM25 retrieval at `k=3` from in-memory documents for lexical precision.",
+          "I fuse results with weights `[0.5, 0.5]` to keep behavior balanced and interpretable.",
+        ],
+      },
+      {
+        heading: "2.3 I recover lexical memory after restarts",
+        paragraphs: [
+          "I persist vectors on disk in Chroma and I rebuild BM25 documents from persisted records during app lifespan startup.",
+          "I do this because BM25 is memory-resident in this design, and I need retrieval continuity without forcing immediate re-upload after reboot.",
+          "I treat startup hydration as mandatory infrastructure because hybrid retrieval is only reliable when both branches are warm.",
         ],
       },
     ],
   },
   {
     id: "pdf-parsing-context-stuffing",
-    title: "Chapter 2: PDF Parsing & Context Stuffing",
-    subtitle: "ETL discipline that makes model answers coherent and citable",
+    title: "Chapter 3: PDF ETL and Chunk Engineering",
+    subtitle: "I convert raw PDFs into deterministic retrieval memory",
     icon: BookOpenText,
     sections: [
       {
-        heading: "2.1 Document ETL Pipeline",
+        heading: "3.1 I extract page text with explicit metadata",
         paragraphs: [
-          "DocuMind treats PDF ingestion as an ETL pipeline: extract page text, transform into chunk-ready documents with metadata, then load into retrieval storage.",
-          "This removes the fragility of raw file prompting and creates deterministic, queryable memory for the assistant.",
+          "I parse PDFs with PyMuPDF (`fitz`) and I iterate page-by-page so every extracted block stays tied to page boundaries.",
+          "I skip empty pages and I normalize metadata fields such as `source` and `page` so downstream retrieval logic can rely on consistent structure.",
+          "I convert each extracted page into LangChain `Document` objects so every next stage operates on typed units instead of loose strings.",
         ],
       },
       {
-        heading: "2.2 Chunk Strategy and Why It Is a Product Decision",
+        heading: "3.2 I tune recursive chunking as a quality control system",
         paragraphs: [
-          "Recursive splitting with tuned size and overlap is not a formatting detail; it is a quality-control lever. Too small fragments context, too large dilutes retrieval focus.",
-          "Overlap preserves meaning at chunk boundaries, improving answer coherence for clause-heavy legal and technical documents.",
+          "I split with `RecursiveCharacterTextSplitter` using configurable `CHUNK_SIZE` and fixed overlap `150`, and I use this as the main quality lever for answer coherence.",
+          "I pick overlap to preserve clause continuity across chunk boundaries, and I reduce edge-loss for legal, financial, and specification-heavy documents.",
+          "I keep chunking deterministic because retrieval quality and citation trust collapse quickly when chunk topology is unstable.",
         ],
       },
       {
-        heading: "2.3 Context Stuffing with Guardrails",
+        heading: "3.3 I load chunks into persistent and queryable storage",
         paragraphs: [
-          "Retrieved chunks are formatted with explicit metadata and inserted into prompt context as first-class evidence. Prompt contracts require answer grounding and structured citations.",
-          "This architecture turns the model from a guessing engine into an evidence-driven responder.",
+          "I assign every chunk a durable `chunk_id` and I upsert chunks into Chroma with explicit IDs so repeated ingestion stays consistent.",
+          "I persist vectors to disk when available and I keep storage directory configurable via `CHROMA_PERSIST_DIR`.",
+          "I maintain the same chunk documents in BM25 memory so lexical and semantic branches operate on aligned evidence units.",
+        ],
+      },
+      {
+        heading: "3.4 I render context for the model as structured evidence",
+        paragraphs: [
+          "I format retrieved chunks into numbered context blocks that include `document_id`, `filename`, and `page_number` before generation.",
+          "I make metadata explicit in prompt context because citation tool output must exactly mirror those values.",
+          "I use this format as the bridge between retrieval truth and generation behavior, and I treat it as the anti-hallucination backbone.",
         ],
       },
     ],
   },
   {
     id: "llm-router-pattern",
-    title: "Chapter 3: The LLM Router Pattern",
-    subtitle: "The anti-lock-in core of the new DocuMind runtime",
+    title: "Chapter 4: Prompt and Generation Orchestration",
+    subtitle: "I enforce grounded answers through strict prompt contracts",
     icon: Shuffle,
     sections: [
       {
-        heading: "3.1 Provider Abstraction by Header Contract",
+        heading: "4.1 I separate retrieval intent from answer intent",
         paragraphs: [
-          "DocuMind now routes generation by provider through `X-Model-Provider` (`groq` or `openai`), with backend routing handled by explicit dependency and factory logic.",
-          "This is a conscious enterprise architecture decision by Lead Engineer Artem Moshnin: preserve runtime optionality and prevent vendor lock-in while keeping one stable product surface.",
+          "I reformulate multi-turn user input into a standalone retrieval query when history exists, and I keep this step independent from final answer wording.",
+          "I retrieve with the reformulated query and I generate with the original user question plus chat history so retrieval precision and conversational UX stay aligned.",
+          "I split these concerns deliberately because retrieval optimization and answer style optimization are different engineering problems.",
         ],
       },
       {
-        heading: "3.2 Why Groq + Llama 3 Is the Default",
+        heading: "4.2 I enforce citation integrity with structured outputs",
         paragraphs: [
-          "Defaulting to Groq (Llama 3) optimizes onboarding speed: ultra-low-latency inference, no user API key requirement, immediate first query experience.",
-          "This default is product-led: remove setup friction first, then expose advanced provider controls only when needed.",
+          "I define strict system prompts that prohibit outside knowledge and I require citation metadata to match retrieved context exactly.",
+          "I use typed Pydantic response models for non-streaming answers and I validate citations against schema before I return responses.",
+          "I force `source_text` to remain verbatim so users can audit claims directly against the uploaded document.",
         ],
-        alert: {
-          title: "Default Runtime Policy",
-          body: "Groq + Llama 3 is optimized for instant onboarding. OpenAI BYOK remains a first-class fallback for power users and enterprise governance.",
-        },
       },
       {
-        heading: "3.3 OpenAI BYOK Fallback",
+        heading: "4.3 I stream text and citations in a single model pass",
         paragraphs: [
-          "OpenAI mode uses BYOK. The user key is supplied only when `openai` is selected, allowing advanced users to bring their own quota, billing, and policy controls.",
-          "This dual-mode architecture keeps one UX while supporting two operating models: free-tier speed path and enterprise-controlled spend path.",
+          "I bind a `CitationTool` during streaming generation and I accumulate both text tokens and tool-call argument fragments concurrently.",
+          "I parse tool-call JSON buffers at stream completion and I emit a final event that carries fully typed citations.",
+          "I use one-pass streaming because I reduce latency and token spend while preserving structured provenance.",
+        ],
+        bullets: [
+          "I append every token into the visible assistant message in real time.",
+          "I parse tool-call chunks defensively so partial JSON does not break the stream.",
+          "I finalize response payloads through `ChatResponse` serialization for deterministic client parsing.",
+        ],
+      },
+      {
+        heading: "4.4 I keep model behavior predictable under missing context",
+        paragraphs: [
+          "I instruct the model to state context insufficiency explicitly when evidence is missing, and I require empty citation arrays in that state.",
+          "I prefer explicit uncertainty over speculative completion because enterprise trust is built on reliability instead of verbosity.",
+          "I treat this rule as a product principle and not as an optional prompt tweak.",
         ],
       },
     ],
   },
   {
-    id: "decoupled-embeddings",
-    title: "Chapter 4: Decoupled Embeddings",
-    subtitle: "Why provider switching does not force re-indexing",
+    id: "vendor-agnostic-router",
+    title: "Chapter 5: Vendor-Agnostic LLM Router",
+    subtitle: "I keep one product surface while I swap model backends",
     icon: Rocket,
     sections: [
       {
-        heading: "4.1 Embeddings Are Provider-Independent Infrastructure",
+        heading: "5.1 I route providers through a hard API contract",
         paragraphs: [
-          "DocuMind uses `HuggingFaceEmbeddings` with `all-MiniLM-L6-v2` for vector indexing. This embedding layer is intentionally decoupled from generation providers.",
-          "Generation can switch between Groq and OpenAI without changing embedding space or vector-store schema.",
+          "I route providers through `X-Model-Provider` and I constrain allowed values to `groq` or `openai` at request boundaries.",
+          "I reject unsupported providers with `400` early and I keep routing logic centralized in dependencies instead of scattering checks across handlers.",
+          "I use this pattern so every endpoint shares the same control-plane behavior for provider selection.",
         ],
       },
       {
-        heading: "4.2 Mid-Conversation Provider Switching Without Reprocessing",
+        heading: "5.2 I instantiate models through a factory boundary",
         paragraphs: [
-          "Because indexing is tied to a stable embedding model, provider changes do not trigger PDF re-indexing. Users can switch engines mid-session and continue querying the same indexed corpus.",
-          "This removes an expensive and disruptive failure mode common in tightly coupled RAG stacks.",
-        ],
-        bullets: [
-          "No re-embedding churn when toggling providers.",
-          "Consistent retrieval behavior across generation engines.",
-          "Lower operational cost and better session continuity.",
+          "I create OpenAI and Groq chat models through `get_llm` so endpoint code stays provider-neutral after dependency resolution.",
+          "I set OpenAI to `gpt-4o-mini` and Groq to `llama3-8b-8192`, and I keep temperature deterministic at `0` for consistency.",
+          "I isolate provider constructors because I want future provider additions to touch one module boundary instead of every endpoint.",
         ],
       },
-    ],
-  },
-  {
-    id: "cost-performance-tradeoffs",
-    title: "Chapter 5: Cost vs Performance Trade-Offs",
-    subtitle: "Transparent provider economics for enterprise decision makers",
-    icon: BookOpenText,
-    sections: [
       {
-        heading: "5.1 Practical Trade-Off Matrix",
+        heading: "5.3 I optimize onboarding and control as separate modes",
         paragraphs: [
-          "DocuMind exposes provider choice as an explicit operating lever. Teams can choose speed-first or quota/budget-first behavior without changing product workflows.",
+          "I default to Groq for low-friction onboarding and low-latency first token experiences.",
+          "I expose OpenAI as BYOK fallback so power users can attach their own account limits, policy controls, and budget ownership.",
+          "I treat this dual-mode architecture as an anti-lock-in product strategy instead of a temporary compatibility layer.",
         ],
         table: {
-          columns: ["Dimension", "Groq (Llama 3 - Default)", "OpenAI (GPT-4o)"],
+          columns: ["Dimension", "Groq (Default)", "OpenAI (BYOK)"],
           rows: [
             [
-              "Inference Speed",
-              "Excellent latency profile (LPU-based runtime)",
-              "Strong performance, typically less burst-optimized",
+              "Primary Advantage",
+              "I deliver fast onboarding and very low latency.",
+              "I deliver user-controlled quota and policy governance.",
             ],
             [
-              "Rate Limits",
-              "Strict free-tier request limits",
-              "Higher account-based limits for many workloads",
+              "Operational Risk",
+              "I can hit strict free-tier rate limits.",
+              "I can fail on invalid user credentials.",
             ],
             [
-              "Onboarding",
-              "No API key needed for end user",
-              "Requires BYOK setup",
-            ],
-            [
-              "Cost Ownership",
-              "Platform-side provider cost model",
-              "User directly controls spend through key",
-            ],
-            [
-              "Best Operational Fit",
-              "Fast trials, demos, internal prototypes",
-              "Power users, policy-heavy production usage",
+              "UX Recovery Path",
+              "I encourage retry or provider switch after `429`.",
+              "I clear invalid keys and reopen settings after `401`.",
             ],
           ],
         },
@@ -203,184 +260,346 @@ const chapters: Chapter[] = [
     ],
   },
   {
-    id: "system-resilience",
-    title: "Chapter 6: System Resilience",
-    subtitle: "Graceful handling of provider-specific failure paths",
+    id: "decoupled-embeddings",
+    title: "Chapter 6: Decoupled Embeddings and Index Stability",
+    subtitle: "I keep retrieval infrastructure independent from generation engines",
+    icon: Rocket,
+    sections: [
+      {
+        heading: "6.1 I pin indexing to a provider-independent embedding model",
+        paragraphs: [
+          "I run embeddings through `HuggingFaceEmbeddings` with `all-MiniLM-L6-v2` and I cache the embedding model instance with `lru_cache`.",
+          "I decouple embeddings from generation so provider switching does not trigger re-indexing or schema churn.",
+          "I treat embedding independence as a long-term platform decision because model providers will evolve faster than document memory formats.",
+        ],
+      },
+      {
+        heading: "6.2 I preserve retrieval behavior across provider switches",
+        paragraphs: [
+          "I keep the vector store and BM25 corpus stable while users toggle providers, and I preserve retrieval consistency across the same document set.",
+          "I avoid expensive re-embedding loops during active sessions, and I keep response latency focused on retrieval plus generation only.",
+          "I reduce both infrastructure cost and user friction because switching engines does not reset document intelligence.",
+        ],
+        bullets: [
+          "I keep chunk identity stable with durable `chunk_id` values.",
+          "I keep vector persistence durable through Chroma disk storage.",
+          "I keep lexical and dense branches aligned on the same chunk corpus.",
+        ],
+      },
+    ],
+  },
+  {
+    id: "stateless-security-model",
+    title: "Chapter 7: Stateless Security and BYOK",
+    subtitle: "I move credential control to the user without storing secrets server-side",
     icon: LockKeyhole,
     sections: [
       {
-        heading: "6.1 Dynamic Routing + Explicit Error Semantics",
+        heading: "7.1 I keep API key ownership in the browser",
         paragraphs: [
-          "The backend handles provider-specific exceptions as first-class behaviors: Groq rate pressure surfaces as `429`, OpenAI auth failures surface as `401`.",
-          "The frontend response strategy is equally explicit: invalid OpenAI credentials are cleared and settings are reopened; Groq limit events preserve user context and encourage retry or provider switch.",
+          "I store user OpenAI keys in browser local storage only, and I never persist them in backend databases.",
+          "I inject keys only when the selected provider is OpenAI, and I send them through `X-OpenAI-Key` on encrypted transport.",
+          "I keep this model stateless on the server so credential compromise blast radius stays minimal.",
         ],
       },
       {
-        heading: "6.2 Why This Is Enterprise-Grade",
+        heading: "7.2 I enforce auth recovery in the API client layer",
         paragraphs: [
-          "Resilience is not only about avoiding crashes. It is about preserving user momentum under vendor constraints while keeping control-plane decisions transparent.",
-          "This architecture gives DocuMind strategic leverage: teams are not trapped by one vendor's limits, pricing, or outages.",
+          "I centralize request headers in `apiFetch` and I always attach `X-Model-Provider` for backend routing consistency.",
+          "I trap `401` responses client-side and I clear local OpenAI keys immediately before I dispatch the settings recovery event.",
+          "I reopen settings with explicit error messaging so users can recover without losing broader chat context.",
         ],
         bullets: [
-          "Provider-aware fallback logic reduces operational dead-ends.",
-          "Session continuity is maintained across model-provider switches.",
-          "The platform remains adaptable as model market conditions evolve.",
-        ],
-      },
-      {
-        heading: "6.3 Product Architect Outcome",
-        paragraphs: [
-          "Artem Moshnin's design objective is clear: convert model capability into reliable business throughput. Vendor abstraction, decoupled embeddings, and resilient error handling together create a durable enterprise product, not a single-provider demo.",
+          "I clear stale credentials automatically after unauthorized responses.",
+          "I keep Groq mode key-free so onboarding does not block on secret setup.",
+          "I separate provider preference state from key state to avoid accidental lockouts.",
         ],
       },
     ],
   },
-];
+  {
+    id: "frontend-runtime-ux",
+    title: "Chapter 8: Frontend Runtime and Interaction Design",
+    subtitle: "I implement a streaming-first UI state machine for evidence-driven chat",
+    icon: BookOpenText,
+    sections: [
+      {
+        heading: "8.1 I gate user actions with explicit readiness checks",
+        paragraphs: [
+          "I block message sending until required prerequisites are ready, and I evaluate readiness from provider mode, API key state, and document upload state.",
+          "I surface deterministic blocked reasons in the chat composer so users understand exactly why sending is disabled.",
+          "I keep `New Session` hidden until the current session is used, and I avoid redundant controls when state is already blank.",
+        ],
+      },
+      {
+        heading: "8.2 I parse SSE manually for deterministic rendering control",
+        paragraphs: [
+          "I read the Fetch `ReadableStream` directly in the chat component and I decode incremental bytes with `TextDecoder`.",
+          "I parse SSE blocks on `\\n\\n` boundaries and I support multiple `data:` lines per event for robust payload reconstruction.",
+          "I append incoming token chunks into the active assistant message so users see low-latency typing behavior without polling.",
+        ],
+        bullets: [
+          "I switch off the typing indicator when I receive first-byte token data.",
+          "I finalize assistant messages when I receive the `final` event payload.",
+          "I keep citations attached to the same completed assistant turn for traceability.",
+        ],
+      },
+      {
+        heading: "8.3 I synchronize citation interactions across panes",
+        paragraphs: [
+          "I lift `activeCitation` state to the dashboard page and I pass it into both chat and document panes.",
+          "I render citation badges under assistant messages and I map each click to a full source chunk view on the right panel.",
+          "I treat this split-pane interaction as evidence navigation, and I keep provenance visible at the exact point of user intent.",
+        ],
+      },
+    ],
+  },
+  {
+    id: "system-resilience",
+    title: "Chapter 9: Resilience, Performance, and Operational Discipline",
+    subtitle: "I harden failure paths while I keep latency and quality predictable",
+    icon: LockKeyhole,
+    sections: [
+      {
+        heading: "9.1 I map vendor-specific failures to actionable UX behavior",
+        paragraphs: [
+          "I treat provider-specific exceptions as first-class runtime states: Groq pressure as `429`, OpenAI auth issues as `401`.",
+          "I pair backend semantics with frontend recovery so invalid OpenAI credentials clear and reopen settings while Groq limits preserve context and suggest retry or provider switch.",
+          "I prefer explicit failure semantics because silent degradation destroys trust faster than visible controlled errors.",
+        ],
+      },
+      {
+        heading: "9.2 I optimize throughput with asynchronous boundaries",
+        paragraphs: [
+          "I offload CPU-heavy operations such as PDF extraction and retrieval storage tasks into `asyncio.to_thread` so API responsiveness stays high.",
+          "I pre-read the first stream event before continuous yielding so immediate provider failures surface deterministically before long stream lifecycles.",
+          "I cache settings and embedding models where safe so I avoid repeated initialization overhead in hot paths.",
+        ],
+        bullets: [
+          "I use provider-aware fallback paths to reduce operational dead-ends.",
+          "I maintain session continuity across model-provider switches and retries.",
+          "I keep latency stable through chunked streaming and incremental rendering.",
+        ],
+      },
+      {
+        heading: "9.3 I maintain quality with repeatable evaluation loops",
+        paragraphs: [
+          "I run an evaluation script over a golden dataset and I score faithfulness plus answer relevance with structured judge outputs.",
+          "I measure end-to-end behavior instead of isolated component metrics because retrieval and generation quality are tightly coupled in production.",
+          "I use this evaluation loop as release discipline so architecture changes improve business outcomes and not only code elegance.",
+        ],
+      },
+      {
+        heading: "9.4 I frame the architecture as a durable product system",
+        paragraphs: [
+          "I design DocuMind to convert general LLM capability into reliable document intelligence throughput for real teams.",
+          "I combine retrieval rigor, provider abstraction, stateless security, and streaming UX so the system remains trustworthy under enterprise load.",
+          "I built this as a platform architecture and not as a single-model demo so I can evolve providers, prompts, and retrieval policies without replatforming.",
+        ],
+      },
+    ],
+  },
+]
 
 const architecturePrinciples = [
-  "Ground every answer in retrievable evidence.",
-  "Prefer explicit contracts over hidden coupling.",
-  "Prevent vendor lock-in through provider abstraction.",
-  "Optimize for explainability and operational resilience.",
-];
+  "I ground every answer in retrievable evidence.",
+  "I prefer explicit contracts over hidden coupling in every layer.",
+  "I decouple retrieval, embeddings, and generation to keep runtime flexibility.",
+  "I prevent lock-in through provider abstraction and stateless security boundaries.",
+  "I optimize for explainability, resilience, and operational clarity.",
+  "I treat UX state machines as part of system correctness and not visual polish.",
+  "I measure quality through repeatable evaluation loops before I trust intuition.",
+]
 
 const executiveWhatWeBuiltSections = [
   {
-    title: "The LLM Router Pattern",
+    title: "Runtime Orchestration",
     summary:
-      "DocuMind dynamically routes generation to Groq or OpenAI via one stable API surface.",
+      "I orchestrate ingestion, retrieval, reformulation, generation, and citation rendering as one deterministic runtime pipeline.",
     whatBuilt:
-      "Default runtime is Groq + Llama 3 for speed and zero-friction onboarding; OpenAI BYOK is the controlled fallback for power users.",
+      "I implemented strict endpoint contracts, streaming SSE semantics, typed payloads, and cross-pane citation linking so every answer is traceable.",
     complexity: [
-      "Provider routing is explicit and validated server-side.",
-      "Frontend and backend coordinate on provider headers and recovery UX.",
-      "This is a deliberate anti-lock-in architecture strategy.",
+      "I synchronize backend stream events and frontend parser state machines.",
+      "I persist chat history in session flow while I preserve low-latency rendering.",
+      "I keep error semantics explicit so recovery paths remain deterministic.",
     ],
   },
   {
-    title: "Decoupled Embeddings",
+    title: "Retrieval Intelligence",
     summary:
-      "Vector indexing uses a provider-independent embedding model: `all-MiniLM-L6-v2`.",
+      "I combine BM25 and dense retrieval with fusion because enterprise questions fail across lexical and semantic axes.",
     whatBuilt:
-      "By separating embeddings from generation, DocuMind allows provider switching without re-indexing uploaded PDFs.",
+      "I implemented hybrid retrieval, RRF-style rank fusion, persistent vectors, and startup hydration of lexical memory.",
     complexity: [
-      "Stable retrieval corpus across Groq/OpenAI toggles.",
-      "Lower indexing churn and lower cost footprint.",
-      "Mid-conversation provider switches remain practical.",
+      "I keep retrieval stable across restarts by rebuilding BM25 from disk-backed data.",
+      "I tune chunk topology for both citation fidelity and answer coherence.",
+      "I isolate embedding infrastructure from generation infrastructure.",
     ],
   },
   {
-    title: "Resilience and ROI",
+    title: "Vendor-Agnostic Security",
     summary:
-      "DocuMind handles 429 (Groq limits) and 401 (OpenAI auth) as designed operational states, not edge-case failures.",
+      "I keep provider routing abstract while I keep user credential control local through BYOK.",
     whatBuilt:
-      "Provider-specific exception handling, explicit user messaging, and fallback paths keep workflows moving and protect business productivity.",
+      "I implemented provider headers, conditional key injection, automatic 401 key invalidation, and settings-driven remediation UX.",
     complexity: [
-      "Rate-limit events do not corrupt session context.",
-      "Credential failures trigger targeted remediation flows.",
-      "Teams keep optionality as vendor conditions change.",
+      "I keep server-side logic stateless with respect to user secrets.",
+      "I keep provider failure handling explicit for both OpenAI and Groq paths.",
+      "I keep operating modes flexible without creating divergent product surfaces.",
     ],
   },
-];
+  {
+    title: "Operational Discipline",
+    summary:
+      "I maintain reliability through typed schemas, async boundaries, and quality evaluation loops.",
+    whatBuilt:
+      "I implemented explicit exception mapping, structured responses, stream-safe parsing, and judge-based regression scoring.",
+    complexity: [
+      "I prevent silent failures through typed payload and status contracts.",
+      "I protect user momentum with graceful retry and recovery paths.",
+      "I align engineering decisions with business throughput and trust.",
+    ],
+  },
+]
 
 export default function ArchitecturePage() {
   return (
     <div className="min-h-dvh bg-background">
-      <div className="mx-auto grid w-full max-w-[1600px] grid-cols-1 gap-6 p-4 lg:grid-cols-[300px_minmax(0,1fr)] lg:p-6">
-        <aside className="lg:sticky lg:top-6 lg:h-[calc(100dvh-3rem)]">
-          <Card className="h-full min-h-0 overflow-hidden">
-            <CardHeader className="gap-2">
+      <div className="mx-auto grid w-full max-w-[1700px] grid-cols-1 gap-6 p-4 lg:gap-8 lg:p-6 xl:grid-cols-[340px_minmax(0,1fr)]">
+        <aside className="xl:sticky xl:top-6 xl:h-[calc(100dvh-3rem)]">
+          <Card className="flex h-full min-h-0 flex-col overflow-hidden border-muted-foreground/20">
+            <CardHeader className="space-y-4">
               <CardTitle className="text-base">DocuMind Architecture</CardTitle>
               <CardDescription className="text-xs">
                 Lead Architect: Artem Moshnin
               </CardDescription>
-              <Button asChild variant="default" size="sm" className="mt-1">
-                <Link href="/">
-                  <ArrowLeft className="size-4" />
-                  Return to Dashboard
-                </Link>
-              </Button>
+              <div className="space-y-2">
+                <Button asChild variant="default" size="sm" className="w-full">
+                  <Link href="/">
+                    <ArrowLeft className="size-4" />
+                    Return to Dashboard
+                  </Link>
+                </Button>
+              </div>
             </CardHeader>
             <Separator />
             <ScrollArea className="min-h-0 flex-1">
-              <div className="space-y-1 p-3">
-                <Button asChild variant="ghost" className="w-full justify-start">
-                  <a href="#executive-summary">Executive Summary</a>
-                </Button>
-                {chapters.map((chapter) => (
-                  <Button
+              <nav className="space-y-2 p-3">
+                <a
+                  href="#executive-summary"
+                  className="block rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm font-medium leading-snug text-foreground transition-colors hover:bg-primary/10"
+                >
+                  Executive Summary
+                </a>
+                {chapters.map((chapter, chapterIndex) => (
+                  <a
                     key={chapter.id}
-                    asChild
-                    variant="ghost"
-                    className="h-auto w-full justify-start whitespace-normal break-words py-2 text-left leading-snug"
+                    href={`#${chapter.id}`}
+                    className="block rounded-md border border-transparent px-3 py-2 transition-colors hover:border-border hover:bg-muted/50"
                   >
-                    <a href={`#${chapter.id}`}>{chapter.title}</a>
-                  </Button>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      Chapter {chapterIndex + 1}
+                    </p>
+                    <p className="mt-0.5 break-words text-sm font-medium leading-snug">
+                      {chapter.title}
+                    </p>
+                    <p className="mt-1 break-words text-xs leading-relaxed text-muted-foreground">
+                      {chapter.subtitle}
+                    </p>
+                  </a>
                 ))}
-              </div>
+              </nav>
             </ScrollArea>
           </Card>
         </aside>
 
-        <div className="space-y-6">
-          <div className="sticky top-3 z-20 lg:hidden">
+        <section className="space-y-8 pb-6">
+          <div className="sticky top-3 z-20 xl:hidden">
             <Card className="border-primary/20 bg-card/95 p-2 backdrop-blur supports-[backdrop-filter]:bg-card/85">
-              <Button asChild variant="default" className="w-full justify-center">
-                <Link href="/">
-                  <ArrowLeft className="size-4" />
-                  Return to Dashboard
-                </Link>
-              </Button>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <Button
+                  asChild
+                  variant="default"
+                  className="w-full justify-center"
+                >
+                  <Link href="/">
+                    <ArrowLeft className="size-4" />
+                    Return to Dashboard
+                  </Link>
+                </Button>
+                <Button
+                  asChild
+                  variant="outline"
+                  className="w-full justify-center"
+                >
+                  <a href="#executive-summary">Executive Summary</a>
+                </Button>
+              </div>
             </Card>
           </div>
 
-          <Card id="executive-summary" className="scroll-mt-24">
+          <Card
+            id="executive-summary"
+            className="scroll-mt-24 border-primary/20 shadow-sm"
+          >
             <CardHeader>
               <CardTitle className="text-2xl">
                 DocuMind Architecture Mini-Book
               </CardTitle>
               <CardDescription>
-                Vendor-agnostic RAG system design for enterprise reliability and
+                I authored this mini-book as Artem Moshnin, Lead Architect and
+                Engineer. I describe my technical blueprint for a
+                vendor-agnostic RAG system built for enterprise reliability and
                 speed.
               </CardDescription>
             </CardHeader>
             <Separator />
-            <CardContent className="space-y-4 pt-6">
-              <p className="text-sm leading-7 text-muted-foreground">
-                DocuMind is now a highly decoupled RAG platform. Retrieval,
-                embeddings, generation routing, security boundaries, and recovery
-                logic are intentionally separated so the product can evolve
-                across model vendors without replatforming.
+            <CardContent className="space-y-6 pt-6">
+              <p className="max-w-4xl text-[15px] leading-7 text-muted-foreground">
+                I built DocuMind as a highly decoupled RAG platform.
+                I intentionally separate retrieval, embeddings, generation
+                routing, security boundaries, and recovery logic so we can
+                evolve across model vendors without replatforming.
               </p>
-              <div className="grid gap-2 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-2">
                 {architecturePrinciples.map((principle, index) => (
                   <div
                     key={`${principle}-${index}`}
-                    className="rounded-md border bg-muted/30 px-3 py-2 text-sm"
+                    className="rounded-lg border bg-muted/20 px-4 py-3 text-sm leading-relaxed"
                   >
                     {principle}
                   </div>
                 ))}
               </div>
-              <div className="grid gap-4">
+              <div className="grid gap-4 xl:grid-cols-3">
                 {executiveWhatWeBuiltSections.map((section) => (
                   <Card
                     key={section.title}
-                    className="border-muted-foreground/20 bg-muted/20 shadow-none"
+                    className="flex h-full flex-col border-muted-foreground/20 bg-muted/20 shadow-none"
                   >
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-base">{section.title}</CardTitle>
+                      <CardTitle className="text-base">
+                        {section.title}
+                      </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-3">
                       <p className="text-sm leading-7 text-muted-foreground">
+                        <span className="font-medium text-foreground">
+                          Summary:
+                        </span>{" "}
                         {section.summary}
                       </p>
                       <p className="text-sm leading-7 text-muted-foreground">
+                        <span className="font-medium text-foreground">
+                          What I built:
+                        </span>{" "}
                         {section.whatBuilt}
                       </p>
-                      <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+                      <ul className="list-disc space-y-2 pl-5 text-sm leading-relaxed text-muted-foreground">
                         {section.complexity.map((point, pointIndex) => (
-                          <li key={`${section.title}-${pointIndex}`}>{point}</li>
+                          <li key={`${section.title}-${pointIndex}`}>
+                            {point}
+                          </li>
                         ))}
                       </ul>
                     </CardContent>
@@ -390,24 +609,37 @@ export default function ArchitecturePage() {
             </CardContent>
           </Card>
 
-          {chapters.map((chapter) => {
-            const Icon = chapter.icon;
+          {chapters.map((chapter, chapterIndex) => {
+            const Icon = chapter.icon
 
             return (
-              <Card key={chapter.id} id={chapter.id} className="scroll-mt-24">
-                <CardHeader className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Icon className="size-5 text-primary" />
-                    <CardTitle className="text-xl">{chapter.title}</CardTitle>
+              <Card
+                key={chapter.id}
+                id={chapter.id}
+                className="scroll-mt-24 border-muted-foreground/20 shadow-sm"
+              >
+                <CardHeader className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="rounded-md border bg-muted/30 px-2 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Chapter {chapterIndex + 1}
+                    </span>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Icon className="size-5 shrink-0 text-primary" />
+                      <CardTitle className="min-w-0 text-xl leading-tight md:text-2xl">
+                        {chapter.title}
+                      </CardTitle>
+                    </div>
                   </div>
-                  <CardDescription>{chapter.subtitle}</CardDescription>
+                  <CardDescription className="text-sm leading-relaxed">
+                    {chapter.subtitle}
+                  </CardDescription>
                 </CardHeader>
                 <Separator />
-                <CardContent className="space-y-8 pt-6">
+                <CardContent className="space-y-5 pt-6">
                   {chapter.sections.map((section, sectionIndex) => (
                     <section
                       key={`${chapter.id}-section-${sectionIndex}`}
-                      className="space-y-3"
+                      className="space-y-4 rounded-lg border bg-muted/15 p-5 md:p-6"
                     >
                       <h3 className="text-base font-semibold tracking-tight">
                         {section.heading}
@@ -415,7 +647,7 @@ export default function ArchitecturePage() {
                       {section.paragraphs.map((paragraph, paragraphIndex) => (
                         <p
                           key={`${chapter.id}-${sectionIndex}-paragraph-${paragraphIndex}`}
-                          className="text-sm leading-7 text-muted-foreground"
+                          className="w-full text-[15px] leading-7 text-muted-foreground"
                         >
                           {paragraph}
                         </p>
@@ -428,14 +660,14 @@ export default function ArchitecturePage() {
                             </CardTitle>
                           </CardHeader>
                           <CardContent>
-                            <p className="text-sm leading-7 text-muted-foreground">
+                            <p className="w-full text-sm leading-7 text-muted-foreground">
                               {section.alert.body}
                             </p>
                           </CardContent>
                         </Card>
                       ) : null}
                       {section.bullets ? (
-                        <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+                        <ul className="list-disc space-y-2 pl-5 text-sm leading-relaxed text-muted-foreground">
                           {section.bullets.map((bullet, bulletIndex) => (
                             <li
                               key={`${chapter.id}-${sectionIndex}-bullet-${bulletIndex}`}
@@ -446,30 +678,32 @@ export default function ArchitecturePage() {
                         </ul>
                       ) : null}
                       {section.table ? (
-                        <div className="overflow-x-auto rounded-md border">
+                        <div className="overflow-x-auto rounded-md border bg-card">
                           <table className="w-full text-left text-sm">
                             <thead className="bg-muted/40">
                               <tr>
-                                {section.table.columns.map((column, columnIndex) => (
-                                  <th
-                                    key={`${chapter.id}-${sectionIndex}-col-${columnIndex}`}
-                                    className="px-3 py-2 font-semibold"
-                                  >
-                                    {column}
-                                  </th>
-                                ))}
+                                {section.table.columns.map(
+                                  (column, columnIndex) => (
+                                    <th
+                                      key={`${chapter.id}-${sectionIndex}-col-${columnIndex}`}
+                                      className="px-3 py-2 font-semibold"
+                                    >
+                                      {column}
+                                    </th>
+                                  ),
+                                )}
                               </tr>
                             </thead>
                             <tbody>
                               {section.table.rows.map((row, rowIndex) => (
                                 <tr
                                   key={`${chapter.id}-${sectionIndex}-row-${rowIndex}`}
-                                  className="border-t"
+                                  className="border-t odd:bg-background even:bg-muted/10"
                                 >
                                   {row.map((cell, cellIndex) => (
                                     <td
                                       key={`${chapter.id}-${sectionIndex}-${rowIndex}-${cellIndex}`}
-                                      className="px-3 py-2 align-top text-muted-foreground"
+                                      className="px-3 py-2 align-top leading-relaxed text-muted-foreground"
                                     >
                                       {cell}
                                     </td>
@@ -484,10 +718,10 @@ export default function ArchitecturePage() {
                   ))}
                 </CardContent>
               </Card>
-            );
+            )
           })}
-        </div>
+        </section>
       </div>
     </div>
-  );
+  )
 }

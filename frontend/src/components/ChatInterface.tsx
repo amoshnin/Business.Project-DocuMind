@@ -46,6 +46,7 @@ type ChatInterfaceProps = {
   onActiveCitationChange: (citation: Citation | null) => void;
   canSendMessages: boolean;
   blockedReason: string | null;
+  onSessionUsedChange?: (used: boolean) => void;
 };
 
 export function ChatInterface({
@@ -53,6 +54,7 @@ export function ChatInterface({
   onActiveCitationChange,
   canSendMessages,
   blockedReason,
+  onSessionUsedChange,
 }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
   const [draft, setDraft] = useState("");
@@ -147,6 +149,7 @@ export function ChatInterface({
         content: "",
       },
     ]);
+    onSessionUsedChange?.(true);
     setDraft("");
     onActiveCitationChange(null);
     setIsTyping(true);

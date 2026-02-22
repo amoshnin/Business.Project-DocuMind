@@ -53,7 +53,7 @@ cd backend
 python3.11 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
-pip install fastapi "uvicorn[standard]" langchain langchain-openai langchain-community langchain-text-splitters langchain-chroma chromadb pymupdf pydantic pydantic-settings python-multipart rank_bm25
+pip install -r requirements.txt
 ```
 
 ### 2) Configure backend environment
@@ -61,6 +61,7 @@ pip install fastapi "uvicorn[standard]" langchain langchain-openai langchain-com
 Create `backend/.env`:
 
 ```env
+GROQ_API_KEY=your_groq_api_key
 OPENAI_API_KEY=your_openai_api_key
 CHROMA_PERSIST_DIR=./chroma_data
 ```

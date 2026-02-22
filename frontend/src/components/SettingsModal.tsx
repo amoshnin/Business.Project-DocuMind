@@ -35,14 +35,7 @@ export function SettingsModal({
     getModelProvider(),
   )
 
-  const handleOpenChange = (nextOpen: boolean) => {
-    if (nextOpen) {
-      setApiKeyValue(getUserApiKey() ?? "")
-      setProvider(getModelProvider())
-    }
-
-    onOpenChange(nextOpen)
-  }
+  const handleOpenChange = (nextOpen: boolean) => onOpenChange(nextOpen)
 
   const saveSettings = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -52,7 +45,7 @@ export function SettingsModal({
       setUserApiKey(apiKey)
     }
 
-    onOpenChange(false)
+    handleOpenChange(false)
   }
 
   const isSaveDisabled = provider === "openai" && !apiKey.trim()
@@ -61,9 +54,9 @@ export function SettingsModal({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Settings: AI Engine & Security</DialogTitle>
+          <DialogTitle>Settings: AI Engine</DialogTitle>
           <DialogDescription>
-            Select your model provider and security mode for DocuMind.
+            Select your model provider for DocuMind.
           </DialogDescription>
         </DialogHeader>
         <form className="space-y-4" onSubmit={saveSettings}>
@@ -120,7 +113,7 @@ export function SettingsModal({
                   <li>Model preference is saved locally.</li>
                   <li>
                     OpenAI keys are saved locally in your browser only and only
-                    sent to OpenAI's API when OpenAI AI Engine is selected.
+                    sent to OpenAI&apos;s API when OpenAI AI Engine is selected.
                   </li>
                   <li>
                     Important Note: We do not store or have access to your
@@ -140,7 +133,7 @@ export function SettingsModal({
             <Button
               type="button"
               variant="outline"
-              onClick={() => onOpenChange(false)}
+              onClick={() => handleOpenChange(false)}
             >
               Cancel
             </Button>

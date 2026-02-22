@@ -17,6 +17,8 @@ import { getModelProvider, type ModelProvider } from "@/lib/model-provider";
 export default function Home() {
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [chatSessionKey, setChatSessionKey] = useState(0);
+  const [isCurrentSessionUsed, setIsCurrentSessionUsed] = useState(false);
   const [modelProvider, setModelProvider] = useState<ModelProvider>(() =>
     getModelProvider(),
   );
@@ -65,6 +67,12 @@ export default function Home() {
           ? "Upload a PDF document before sending questions."
           : null;
 
+  const startNewSession = () => {
+    setChatSessionKey((current) => current + 1);
+    setIsCurrentSessionUsed(false);
+    setActiveCitation(null);
+  };
+
   return (
     <div className="h-dvh overflow-hidden bg-background">
       <div className="flex h-full flex-col">
@@ -97,10 +105,12 @@ export default function Home() {
                   Architecture
                 </Link>
               </Button>
-              <Button variant="outline" size="sm">
-                <Sparkles className="size-4" />
-                New Session
-              </Button>
+              {isCurrentSessionUsed ? (
+                <Button variant="outline" size="sm" onClick={startNewSession}>
+                  <Sparkles className="size-4" />
+                  New Session
+                </Button>
+              ) : null}
               <ThemeToggle />
             </div>
           </div>
@@ -108,21 +118,25 @@ export default function Home() {
 
         <main className="mx-auto grid min-h-0 w-full max-w-[1600px] flex-1 grid-cols-1 gap-4 p-4 md:grid-cols-[3fr_2fr] lg:gap-6 lg:p-6">
           <ChatInterface
+            key={chatSessionKey}
             activeCitation={activeCitation}
             onActiveCitationChange={setActiveCitation}
             canSendMessages={canSendMessages}
             blockedReason={chatBlockedReason}
+            onSessionUsedChange={setIsCurrentSessionUsed}
           />
           <DocumentPanel
             activeCitation={activeCitation}
             onDocumentReadyChange={setIsDocumentReady}
           />
         </main>
-        <SettingsModal
-          open={isSettingsModalOpen}
-          onOpenChange={onSettingsModalChange}
-          errorMessage={settingsErrorMessage}
-        />
+        {isSettingsModalOpen ? (
+          <SettingsModal
+            open={isSettingsModalOpen}
+            onOpenChange={onSettingsModalChange}
+            errorMessage={settingsErrorMessage}
+          />
+        ) : null}
       </div>
     </div>
   );

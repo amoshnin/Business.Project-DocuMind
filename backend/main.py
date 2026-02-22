@@ -12,9 +12,15 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 
 try:
-    from openai import AuthenticationError as OpenAIAuthenticationError
+    from openai import (
+        AuthenticationError as OpenAIAuthenticationError,
+        RateLimitError as OpenAIRateLimitError,
+    )
 except Exception:  # pragma: no cover
     class OpenAIAuthenticationError(Exception):
+        pass
+
+    class OpenAIRateLimitError(Exception):
         pass
 
 try:
@@ -99,9 +105,11 @@ def get_llm(provider: str, openai_key: str | None = None) -> BaseChatModel:
         return ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=openai_key)
 
     if ChatGroq is None:
-        raise HTTPException(
-            status_code=500,
-            detail="langchain-groq is not installed on the server.",
+        return ChatOpenAI(
+            model="llama3-8b-8192",
+            temperature=0,
+            api_key=settings.groq_api_key,
+            base_url="https://api.groq.com/openai/v1",
         )
 
     return ChatGroq(
@@ -150,7 +158,7 @@ async def health() -> dict[str, str]:
 async def upload_document(
     file: UploadFile = File(...),
     provider_ctx: tuple[str, str | None] = Depends(get_provider_context),
-) -> dict[str, int]:
+) -> dict[str, int | str]:
     _provider, _openai_key = provider_ctx
 
     if not file.filename:
@@ -160,7 +168,7 @@ async def upload_document(
     if not file_bytes:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
-    chunks = await process_pdf(file_bytes=file_bytes, filename=file.filename)
+    chunks, total_pages = await process_pdf(file_bytes=file_bytes, filename=file.filename)
     embeddings = get_embeddings_model()
     try:
         if chunks:
@@ -169,7 +177,12 @@ async def upload_document(
     except OpenAIAuthenticationError as exc:
         raise HTTPException(status_code=401, detail=INVALID_KEY_DETAIL) from exc
 
-    return {"chunks_generated": len(chunks)}
+    return {
+        "filename": file.filename,
+        "total_pages": total_pages,
+        "chunks_generated": len(chunks),
+        "indexed_chunks": len(chunks),
+    }
 
 
 @app.post("/query", response_model=ChatResponse)
@@ -196,7 +209,7 @@ async def chat(
         return await generate_answer(request.query, retrieved_docs, llm)
     except OpenAIAuthenticationError as exc:
         raise HTTPException(status_code=401, detail=INVALID_KEY_DETAIL) from exc
-    except GroqRateLimitError as exc:
+    except (GroqRateLimitError, OpenAIRateLimitError) as exc:
         raise HTTPException(status_code=429, detail=GROQ_RATE_LIMIT_DETAIL) from exc
 
 
@@ -230,7 +243,7 @@ async def chat_stream(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except OpenAIAuthenticationError as exc:
         raise HTTPException(status_code=401, detail=INVALID_KEY_DETAIL) from exc
-    except GroqRateLimitError as exc:
+    except (GroqRateLimitError, OpenAIRateLimitError) as exc:
         raise HTTPException(status_code=429, detail=GROQ_RATE_LIMIT_DETAIL) from exc
 
     stream_events = stream_answer_events(
@@ -246,7 +259,7 @@ async def chat_stream(
         first_event = {"type": "final", "payload": {"answer": "", "citations": []}}
     except OpenAIAuthenticationError as exc:
         raise HTTPException(status_code=401, detail=INVALID_KEY_DETAIL) from exc
-    except GroqRateLimitError as exc:
+    except (GroqRateLimitError, OpenAIRateLimitError) as exc:
         raise HTTPException(status_code=429, detail=GROQ_RATE_LIMIT_DETAIL) from exc
 
     async def event_generator() -> AsyncIterator[str]:
@@ -277,7 +290,7 @@ async def chat_stream(
         except OpenAIAuthenticationError:
             error_payload = {"detail": INVALID_KEY_DETAIL}
             yield f"data: {json.dumps(error_payload)}\n\n"
-        except GroqRateLimitError:
+        except (GroqRateLimitError, OpenAIRateLimitError):
             error_payload = {"detail": GROQ_RATE_LIMIT_DETAIL}
             yield f"data: {json.dumps(error_payload)}\n\n"
         except Exception as exc:  # pragma: no cover
