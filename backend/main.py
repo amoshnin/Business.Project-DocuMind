@@ -1,5 +1,6 @@
 import json
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,11 +12,18 @@ from services.llm_chain import generate_answer, stream_answer_tokens
 from services.retriever import (
     add_documents_to_store,
     get_hybrid_retriever,
+    initialize_retriever_from_disk,
     retrieve_documents,
 )
 
 
-app = FastAPI(title="DocuMind API")
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    await initialize_retriever_from_disk()
+    yield
+
+
+app = FastAPI(title="DocuMind API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
