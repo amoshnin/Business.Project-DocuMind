@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Bot, BookOpenText, Settings, Sparkles } from "lucide-react";
+import { Bot, BookOpenText, Settings, SlidersHorizontal, Sparkles } from "lucide-react";
 
 import { ChatInterface } from "@/components/ChatInterface";
 import { DocumentPanel } from "@/components/DocumentPanel";
+import { RuntimeConfigModal } from "@/components/RuntimeConfigModal";
 import { SettingsModal } from "@/components/SettingsModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,7 @@ import { getModelProvider, type ModelProvider } from "@/lib/model-provider";
 export default function Home() {
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isRuntimeConfigOpen, setIsRuntimeConfigOpen] = useState(false);
   const [chatSessionKey, setChatSessionKey] = useState(0);
   const [isCurrentSessionUsed, setIsCurrentSessionUsed] = useState(false);
   const [modelProvider, setModelProvider] = useState<ModelProvider>("groq");
@@ -111,6 +113,14 @@ export default function Home() {
                 <Settings className="size-4" />
                 AI Engine
               </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsRuntimeConfigOpen(true)}
+              >
+                <SlidersHorizontal className="size-4" />
+                RAG Config
+              </Button>
               <Button asChild variant="outline" size="sm">
                 <Link href="/architecture">
                   <BookOpenText className="size-4" />
@@ -147,6 +157,12 @@ export default function Home() {
             open={isSettingsModalOpen}
             onOpenChange={onSettingsModalChange}
             errorMessage={settingsErrorMessage}
+          />
+        ) : null}
+        {isRuntimeConfigOpen ? (
+          <RuntimeConfigModal
+            open={isRuntimeConfigOpen}
+            onOpenChange={setIsRuntimeConfigOpen}
           />
         ) : null}
       </div>
