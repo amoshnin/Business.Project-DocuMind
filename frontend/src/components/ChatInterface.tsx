@@ -15,16 +15,12 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { submitQuery } from "@/lib/chat-api";
+import {
+  Citation,
+  getCitationBadgeLabel,
+  getCitationKey,
+} from "@/lib/citations";
 import { cn } from "@/lib/utils";
-
-export type Citation = {
-  source_text: string;
-  metadata?: {
-    document_id?: string;
-    filename?: string;
-    page_number?: number;
-  };
-};
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -45,7 +41,15 @@ const INITIAL_MESSAGES: ChatMessage[] = [
   },
 ];
 
-export function ChatInterface() {
+type ChatInterfaceProps = {
+  activeCitation: Citation | null;
+  onActiveCitationChange: (citation: Citation | null) => void;
+};
+
+export function ChatInterface({
+  activeCitation,
+  onActiveCitationChange,
+}: ChatInterfaceProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
   const [draft, setDraft] = useState("");
   const [isTyping, setIsTyping] = useState(false);
@@ -140,6 +144,7 @@ export function ChatInterface() {
       },
     ]);
     setDraft("");
+    onActiveCitationChange(null);
     setIsTyping(true);
     setIsGenerating(true);
 
@@ -253,27 +258,52 @@ export function ChatInterface() {
               )}
             >
               {message.role === "assistant" ? (
-                <ReactMarkdown
-                  components={{
-                    p: (props) => (
-                      <p className="leading-relaxed" {...props} />
-                    ),
-                    ul: (props) => (
-                      <ul className="ml-5 list-disc space-y-1" {...props} />
-                    ),
-                    ol: (props) => (
-                      <ol className="ml-5 list-decimal space-y-1" {...props} />
-                    ),
-                    code: (props) => (
-                      <code
-                        className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs"
-                        {...props}
-                      />
-                    ),
-                  }}
-                >
-                  {message.content}
-                </ReactMarkdown>
+                <>
+                  <ReactMarkdown
+                    components={{
+                      p: (props) => (
+                        <p className="leading-relaxed" {...props} />
+                      ),
+                      ul: (props) => (
+                        <ul className="ml-5 list-disc space-y-1" {...props} />
+                      ),
+                      ol: (props) => (
+                        <ol className="ml-5 list-decimal space-y-1" {...props} />
+                      ),
+                      code: (props) => (
+                        <code
+                          className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs"
+                          {...props}
+                        />
+                      ),
+                    }}
+                  >
+                    {message.content}
+                  </ReactMarkdown>
+                  {message.citations && message.citations.length > 0 ? (
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {message.citations.map((citation, citationIndex) => {
+                        const citationKey = getCitationKey(citation);
+                        const isActive =
+                          activeCitation !== null &&
+                          getCitationKey(activeCitation) === citationKey;
+
+                        return (
+                          <Button
+                            key={`${citationKey}-${citationIndex}`}
+                            type="button"
+                            variant={isActive ? "default" : "outline"}
+                            size="sm"
+                            className="h-6 px-2 text-xs"
+                            onClick={() => onActiveCitationChange(citation)}
+                          >
+                            {getCitationBadgeLabel(citation, citationIndex)}
+                          </Button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </>
               ) : (
                 <p className="leading-relaxed">{message.content}</p>
               )}

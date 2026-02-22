@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Citation } from "@/lib/citations";
 import { cn } from "@/lib/utils";
 
 type UploadStage = "idle" | "uploading" | "chunking" | "ready" | "error";
@@ -33,7 +34,11 @@ type UploadedDocumentMetadata = {
 
 const BACKEND_UPLOAD_ENDPOINT = "http://localhost:8000/api/v1/documents/upload";
 
-export function DocumentPanel() {
+type DocumentPanelProps = {
+  activeCitation: Citation | null;
+};
+
+export function DocumentPanel({ activeCitation }: DocumentPanelProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const chunkingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -249,10 +254,34 @@ export function DocumentPanel() {
           <Separator />
 
           <div className="space-y-2">
-            <h3 className="text-sm font-semibold">Active Citations</h3>
-            <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-              Citations will appear here after you ask a question.
-            </div>
+            <h3 className="text-sm font-semibold">Active Citation</h3>
+            {activeCitation ? (
+              <Card className="border-primary/40 bg-primary/5 shadow-none">
+                <CardHeader className="gap-2 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-primary">
+                    Source Chunk
+                  </p>
+                  <p className="text-sm leading-relaxed">
+                    {activeCitation.source_text}
+                  </p>
+                  <Separator />
+                  <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                    <span>Filename</span>
+                    <span className="truncate text-right font-medium text-foreground">
+                      {activeCitation.metadata?.filename ?? "Unknown"}
+                    </span>
+                    <span>Page Number</span>
+                    <span className="text-right font-medium text-foreground">
+                      {activeCitation.metadata?.page_number ?? "Unknown"}
+                    </span>
+                  </div>
+                </CardHeader>
+              </Card>
+            ) : (
+              <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                Click a citation badge in chat to inspect its source chunk.
+              </div>
+            )}
           </div>
         </CardContent>
       </ScrollArea>
