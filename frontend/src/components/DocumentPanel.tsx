@@ -32,7 +32,9 @@ type UploadedDocumentMetadata = {
   indexedChunks: number;
 };
 
-const BACKEND_UPLOAD_ENDPOINT = "http://localhost:8000/api/v1/documents/upload";
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const BACKEND_UPLOAD_ENDPOINT = `${API_BASE_URL}/api/v1/documents/upload`;
 
 type DocumentPanelProps = {
   activeCitation: Citation | null;

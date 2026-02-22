@@ -1,4 +1,6 @@
-const CHAT_STREAM_ENDPOINT = "http://localhost:8000/api/v1/chat/stream";
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const CHAT_STREAM_ENDPOINT = `${API_BASE_URL}/api/v1/chat/stream`;
 const SESSION_STORAGE_KEY = "documind_session_id";
 
 function getSessionId(): string {
