@@ -1,5 +1,6 @@
 import asyncio
 from uuid import uuid4
+from typing import Any
 
 try:
     from langchain.retrievers import EnsembleRetriever
@@ -28,30 +29,26 @@ except ImportError:  # pragma: no cover
 
 from config import get_settings
 
-_vector_store: Chroma | None = None
 _bm25_documents: list[Document] = []
-_hybrid_retriever: EnsembleRetriever | None = None
+_settings = get_settings()
 
 
-def _get_vector_store() -> Chroma:
-    global _vector_store
-    if _vector_store is None:
-        settings = get_settings()
-        embeddings = OpenAIEmbeddings(api_key=settings.openai_api_key)
-        _vector_store = Chroma(
-            collection_name="documind",
-            embedding_function=embeddings,
-            persist_directory=settings.chroma_persist_dir,
-        )
+def _new_vector_store(embeddings: OpenAIEmbeddings | None = None) -> Chroma:
+    kwargs: dict[str, Any] = {
+        "collection_name": "documind",
+        "persist_directory": _settings.chroma_persist_dir,
+    }
+    if embeddings is not None:
+        kwargs["embedding_function"] = embeddings
 
-    return _vector_store
+    return Chroma(**kwargs)
 
 
-def _add_documents(chunks: list[Document]) -> None:
+def _add_documents(chunks: list[Document], embeddings: OpenAIEmbeddings) -> None:
     if not chunks:
         return
 
-    vector_store = _get_vector_store()
+    vector_store = _new_vector_store(embeddings)
     ids: list[str] = []
 
     for chunk in chunks:
@@ -68,32 +65,35 @@ def _add_documents(chunks: list[Document]) -> None:
         persist_fn()
 
 
-async def add_documents_to_store(chunks: list[Document]) -> None:
-    await asyncio.to_thread(_add_documents, chunks)
+async def add_documents_to_store(
+    chunks: list[Document], embeddings: OpenAIEmbeddings
+) -> None:
+    await asyncio.to_thread(_add_documents, chunks, embeddings)
 
 
-def _build_hybrid_retriever() -> EnsembleRetriever | None:
-    global _hybrid_retriever
+def _build_hybrid_retriever(
+    embeddings: OpenAIEmbeddings,
+) -> EnsembleRetriever | None:
     if not _bm25_documents:
-        _hybrid_retriever = None
         return None
 
-    dense_retriever = _get_vector_store().as_retriever(search_kwargs={"k": 3})
+    dense_retriever = _new_vector_store(embeddings).as_retriever(search_kwargs={"k": 3})
     bm25_retriever = BM25Retriever.from_documents(_bm25_documents)
     bm25_retriever.k = 3
 
-    _hybrid_retriever = EnsembleRetriever(
+    return EnsembleRetriever(
         retrievers=[dense_retriever, bm25_retriever],
         weights=[0.5, 0.5],
     )
-    return _hybrid_retriever
 
 
-def get_hybrid_retriever(chunks_for_bm25: list[Document]) -> EnsembleRetriever:
+def get_hybrid_retriever(
+    chunks_for_bm25: list[Document], embeddings: OpenAIEmbeddings
+) -> EnsembleRetriever:
     if chunks_for_bm25:
         _bm25_documents.extend(chunks_for_bm25)
 
-    hybrid_retriever = _build_hybrid_retriever()
+    hybrid_retriever = _build_hybrid_retriever(embeddings)
     if hybrid_retriever is None:
         raise RuntimeError("Hybrid retriever is not initialized. Upload documents first.")
 
@@ -101,7 +101,7 @@ def get_hybrid_retriever(chunks_for_bm25: list[Document]) -> EnsembleRetriever:
 
 
 def _extract_documents_from_store() -> list[Document]:
-    vector_store = _get_vector_store()
+    vector_store = _new_vector_store()
     try:
         stored_data = vector_store.get(include=["documents", "metadatas"])
     except TypeError:
@@ -132,24 +132,20 @@ def _extract_documents_from_store() -> list[Document]:
 def _initialize_retriever_from_disk() -> None:
     global _bm25_documents
     _bm25_documents = _extract_documents_from_store()
-    _build_hybrid_retriever()
 
 
 async def initialize_retriever_from_disk() -> None:
     await asyncio.to_thread(_initialize_retriever_from_disk)
 
 
-def _get_active_retriever() -> EnsembleRetriever:
-    if _hybrid_retriever is None:
+def _retrieve_documents(query: str, embeddings: OpenAIEmbeddings) -> list[Document]:
+    retriever = _build_hybrid_retriever(embeddings)
+    if retriever is None:
         raise RuntimeError("Hybrid retriever is not initialized. Upload documents first.")
-
-    return _hybrid_retriever
-
-
-def _retrieve_documents(query: str) -> list[Document]:
-    retriever = _get_active_retriever()
     return retriever.invoke(query)
 
 
-async def retrieve_documents(query: str) -> list[Document]:
-    return await asyncio.to_thread(_retrieve_documents, query)
+async def retrieve_documents(
+    query: str, embeddings: OpenAIEmbeddings
+) -> list[Document]:
+    return await asyncio.to_thread(_retrieve_documents, query, embeddings)

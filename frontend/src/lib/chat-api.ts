@@ -1,3 +1,5 @@
+import { apiFetch } from "@/lib/api-client";
+
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const CHAT_STREAM_ENDPOINT = `${API_BASE_URL}/api/v1/chat/stream`;
@@ -19,7 +21,7 @@ function getSessionId(): string {
 }
 
 export async function submitQuery(query: string): Promise<Response> {
-  const response = await fetch(CHAT_STREAM_ENDPOINT, {
+  const response = await apiFetch(CHAT_STREAM_ENDPOINT, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

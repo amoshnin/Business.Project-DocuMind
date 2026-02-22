@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { apiFetch } from "@/lib/api-client";
 import { Citation } from "@/lib/citations";
 import { cn } from "@/lib/utils";
 
@@ -83,7 +84,7 @@ export function DocumentPanel({ activeCitation }: DocumentPanelProps) {
     }, 700);
 
     try {
-      const response = await fetch(BACKEND_UPLOAD_ENDPOINT, {
+      const response = await apiFetch(BACKEND_UPLOAD_ENDPOINT, {
         method: "POST",
         body: formData,
       });

@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from pydantic import BaseModel, Field
 
 from config import get_settings
@@ -43,12 +43,11 @@ class JudgeScore(BaseModel):
     Answer_Relevance: int = Field(ge=1, le=5)
 
 
-def build_judge_chain() -> Any:
-    settings = get_settings()
+def build_judge_chain(api_key: str) -> Any:
     judge_llm = ChatOpenAI(
         model="gpt-4o-mini",
         temperature=0,
-        api_key=settings.openai_api_key,
+        api_key=api_key,
     )
     structured_judge = judge_llm.with_structured_output(
         JudgeScore, method="function_calling"
@@ -82,8 +81,12 @@ def build_judge_chain() -> Any:
     return judge_prompt | structured_judge
 
 
-async def run_rag_pipeline(query: str, document_text: str, sample_id: int) -> str:
+async def run_rag_pipeline(
+    query: str, document_text: str, sample_id: int, api_key: str
+) -> str:
     filename = f"golden-sample-{sample_id}.txt"
+    embeddings = OpenAIEmbeddings(api_key=api_key)
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=api_key)
     chunk = Document(
         page_content=document_text,
         metadata={
@@ -96,15 +99,20 @@ async def run_rag_pipeline(query: str, document_text: str, sample_id: int) -> st
         },
     )
 
-    await add_documents_to_store([chunk])
-    get_hybrid_retriever([chunk])
-    retrieved_docs = await retrieve_documents(query)
-    response = await generate_answer(query, retrieved_docs)
+    await add_documents_to_store([chunk], embeddings)
+    get_hybrid_retriever([chunk], embeddings)
+    retrieved_docs = await retrieve_documents(query, embeddings)
+    response = await generate_answer(query, retrieved_docs, llm)
     return response.answer
 
 
 async def evaluate() -> None:
-    judge_chain = build_judge_chain()
+    settings = get_settings()
+    if not settings.openai_api_key:
+        raise RuntimeError("Set OPENAI_API_KEY to run evaluation.")
+
+    api_key = settings.openai_api_key
+    judge_chain = build_judge_chain(api_key)
 
     total_faithfulness = 0
     total_relevance = 0
@@ -114,6 +122,7 @@ async def evaluate() -> None:
             query=item["query"],
             document_text=item["document_text"],
             sample_id=index,
+            api_key=api_key,
         )
 
         judge_result = await judge_chain.ainvoke(
