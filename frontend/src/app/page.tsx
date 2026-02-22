@@ -5,6 +5,7 @@ import { Bot, Sparkles } from "lucide-react";
 
 import { ChatInterface } from "@/components/ChatInterface";
 import { DocumentPanel } from "@/components/DocumentPanel";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { Citation } from "@/lib/citations";
 
@@ -22,10 +23,13 @@ export default function Home() {
                 DocuMind
               </span>
             </div>
-            <Button variant="outline" size="sm">
-              <Sparkles className="size-4" />
-              New Session
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm">
+                <Sparkles className="size-4" />
+                New Session
+              </Button>
+              <ThemeToggle />
+            </div>
           </div>
         </header>
 

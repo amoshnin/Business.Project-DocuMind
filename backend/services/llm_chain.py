@@ -8,7 +8,6 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, ValidationError
 
-from config import get_settings
 from schemas import ChatResponse, Citation
 
 
@@ -43,28 +42,8 @@ def _format_context(retrieved_docs: list[Document]) -> str:
     return "\n\n".join(sections)
 
 
-settings = get_settings()
-
-_llm = ChatOpenAI(
-    model="gpt-4o-mini",
-    temperature=0,
-    api_key=settings.openai_api_key,
-)
-
-_structured_llm = _llm.with_structured_output(ChatResponse, method="function_calling")
-
-
 class CitationTool(BaseModel):
     citations: list[Citation]
-
-
-_tool_llm = _llm.bind_tools([CitationTool])
-
-_reformulation_llm = ChatOpenAI(
-    model="gpt-4o-mini",
-    temperature=0,
-    api_key=settings.openai_api_key,
-)
 
 _prompt = ChatPromptTemplate.from_messages(
     [
@@ -137,9 +116,12 @@ _reformulation_prompt = ChatPromptTemplate.from_messages(
 )
 
 
-async def generate_answer(query: str, retrieved_docs: list[Document]) -> ChatResponse:
+async def generate_answer(
+    query: str, retrieved_docs: list[Document], llm: ChatOpenAI
+) -> ChatResponse:
     context = _format_context(retrieved_docs)
-    chain = _prompt | _structured_llm
+    structured_llm = llm.with_structured_output(ChatResponse, method="function_calling")
+    chain = _prompt | structured_llm
     result = await chain.ainvoke({"context": context, "query": query})
 
     if isinstance(result, ChatResponse):
@@ -171,11 +153,13 @@ def _extract_text_from_chunk(chunk: Any) -> str:
     return _extract_text_from_content(content)
 
 
-async def reformulate_query(raw_query: str, chat_history: list[BaseMessage]) -> str:
+async def reformulate_query(
+    raw_query: str, chat_history: list[BaseMessage], llm: ChatOpenAI
+) -> str:
     if not chat_history:
         return raw_query
 
-    chain = _reformulation_prompt | _reformulation_llm
+    chain = _reformulation_prompt | llm
     result = await chain.ainvoke({"chat_history": chat_history, "raw_query": raw_query})
     reformulated = _extract_text_from_content(getattr(result, "content", "")).strip()
     return reformulated or raw_query
@@ -233,10 +217,14 @@ def _parse_citations_from_buffers(buffers: dict[int, str]) -> list[Citation]:
 
 
 async def stream_answer_events(
-    query: str, retrieved_docs: list[Document], chat_history: list[BaseMessage]
+    query: str,
+    retrieved_docs: list[Document],
+    chat_history: list[BaseMessage],
+    llm: ChatOpenAI,
 ) -> AsyncIterator[dict[str, Any]]:
     context = _format_context(retrieved_docs)
-    chain = _stream_prompt | _tool_llm
+    tool_llm = llm.bind_tools([CitationTool])
+    chain = _stream_prompt | tool_llm
     answer_parts: list[str] = []
     tool_call_argument_buffers: dict[int, str] = {}
 
