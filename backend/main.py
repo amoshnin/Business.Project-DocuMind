@@ -5,10 +5,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from services.document_processor import process_pdf
 from schemas import ChatRequest, ChatResponse
-from services.llm_chain import generate_answer, stream_answer_events
+from services.llm_chain import generate_answer, reformulate_query, stream_answer_events
 from services.retriever import (
     add_documents_to_store,
     get_hybrid_retriever,
@@ -24,6 +25,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="DocuMind API", lifespan=lifespan)
+session_store: dict[str, list[BaseMessage]] = {}
 
 app.add_middleware(
     CORSMiddleware,
@@ -68,15 +70,39 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
 @app.post("/api/v1/chat/stream")
 async def chat_stream(request: ChatRequest) -> StreamingResponse:
+    session_id = str(request.session_id)
+    chat_history = session_store.get(session_id, [])
+    retrieval_query = request.query
+
+    if chat_history:
+        retrieval_query = await reformulate_query(
+            raw_query=request.query, chat_history=chat_history
+        )
+
     try:
-        retrieved_docs = await retrieve_documents(request.query)
+        retrieved_docs = await retrieve_documents(retrieval_query)
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     async def event_generator() -> AsyncIterator[str]:
+        final_answer = ""
         try:
-            async for event in stream_answer_events(request.query, retrieved_docs):
+            async for event in stream_answer_events(
+                query=request.query,
+                retrieved_docs=retrieved_docs,
+                chat_history=chat_history,
+            ):
+                if event.get("type") == "final":
+                    payload = event.get("payload")
+                    if isinstance(payload, dict):
+                        answer = payload.get("answer")
+                        if isinstance(answer, str):
+                            final_answer = answer
                 yield f"data: {json.dumps(event)}\n\n"
+
+            history = session_store.setdefault(session_id, [])
+            history.append(HumanMessage(content=request.query))
+            history.append(AIMessage(content=final_answer))
             yield "data: [DONE]\n\n"
         except Exception as exc:  # pragma: no cover
             error_payload = {"type": "error", "message": str(exc)}
