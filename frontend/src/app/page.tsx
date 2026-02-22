@@ -1,16 +1,45 @@
 "use client";
 
-import { useState } from "react";
-import { Bot, Sparkles } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Bot, Settings, Sparkles } from "lucide-react";
 
 import { ChatInterface } from "@/components/ChatInterface";
 import { DocumentPanel } from "@/components/DocumentPanel";
+import { SettingsModal } from "@/components/SettingsModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
+import { DOCUMIND_AUTH_ERROR_EVENT } from "@/lib/api-client";
 import { Citation } from "@/lib/citations";
 
 export default function Home() {
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [settingsErrorMessage, setSettingsErrorMessage] = useState<
+    string | null
+  >(null);
+
+  useEffect(() => {
+    const handleAuthError = (event: Event) => {
+      const customEvent = event as CustomEvent<{ message?: string }>;
+      setSettingsErrorMessage(
+        customEvent.detail?.message ??
+          "Unauthorized request. Please update your API key.",
+      );
+      setIsSettingsModalOpen(true);
+    };
+
+    window.addEventListener(DOCUMIND_AUTH_ERROR_EVENT, handleAuthError);
+    return () => {
+      window.removeEventListener(DOCUMIND_AUTH_ERROR_EVENT, handleAuthError);
+    };
+  }, []);
+
+  const onSettingsModalChange = (open: boolean) => {
+    setIsSettingsModalOpen(open);
+    if (!open) {
+      setSettingsErrorMessage(null);
+    }
+  };
 
   return (
     <div className="h-dvh overflow-hidden bg-background">
@@ -23,7 +52,21 @@ export default function Home() {
                 DocuMind
               </span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
+              <span className="hidden text-xs text-muted-foreground lg:inline">
+                Lead Software Engineer: Artem Moshnin
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setSettingsErrorMessage(null);
+                  setIsSettingsModalOpen(true);
+                }}
+              >
+                <Settings className="size-4" />
+                API Key
+              </Button>
               <Button variant="outline" size="sm">
                 <Sparkles className="size-4" />
                 New Session
@@ -40,6 +83,11 @@ export default function Home() {
           />
           <DocumentPanel activeCitation={activeCitation} />
         </main>
+        <SettingsModal
+          open={isSettingsModalOpen}
+          onOpenChange={onSettingsModalChange}
+          errorMessage={settingsErrorMessage}
+        />
       </div>
     </div>
   );
