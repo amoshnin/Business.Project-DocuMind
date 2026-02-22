@@ -1,11 +1,14 @@
+import json
 from collections.abc import AsyncIterator
+from typing import Any
 
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
+from pydantic import BaseModel, ValidationError
 
 from config import get_settings
-from schemas import ChatResponse
+from schemas import ChatResponse, Citation
 
 
 def _format_context(retrieved_docs: list[Document]) -> str:
@@ -49,6 +52,13 @@ _llm = ChatOpenAI(
 
 _structured_llm = _llm.with_structured_output(ChatResponse, method="function_calling")
 
+
+class CitationTool(BaseModel):
+    citations: list[Citation]
+
+
+_tool_llm = _llm.bind_tools([CitationTool])
+
 _prompt = ChatPromptTemplate.from_messages(
     [
         (
@@ -76,6 +86,33 @@ _prompt = ChatPromptTemplate.from_messages(
     ]
 )
 
+_stream_prompt = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            (
+                "You are an expert technical assistant. Answer the user's question "
+                "using ONLY the provided context. If the answer is not in the "
+                "context, say so. You must provide exact citations matching the "
+                "source metadata.\n\n"
+                "Streaming mode requirements:\n"
+                "1) Stream only the answer text in normal assistant content.\n"
+                "2) After the answer text is complete, call CitationTool exactly "
+                "once with a `citations` list.\n"
+                "3) Every citation must match context metadata exactly "
+                "(`document_id`, `filename`, `page_number`) and use verbatim "
+                "`source_text`.\n"
+                "4) If context is insufficient, state that clearly in answer text "
+                "and call CitationTool with an empty citations list."
+            ),
+        ),
+        (
+            "human",
+            "Context:\n{context}\n\nUser question:\n{query}",
+        ),
+    ]
+)
+
 
 async def generate_answer(query: str, retrieved_docs: list[Document]) -> ChatResponse:
     context = _format_context(retrieved_docs)
@@ -88,13 +125,92 @@ async def generate_answer(query: str, retrieved_docs: list[Document]) -> ChatRes
     return ChatResponse.model_validate(result)
 
 
-async def stream_answer_tokens(
+def _extract_text_from_chunk(chunk: Any) -> str:
+    content = getattr(chunk, "content", "")
+    if isinstance(content, str):
+        return content
+
+    if isinstance(content, list):
+        text_parts: list[str] = []
+        for part in content:
+            if isinstance(part, str):
+                text_parts.append(part)
+            elif isinstance(part, dict):
+                part_text = part.get("text")
+                if isinstance(part_text, str):
+                    text_parts.append(part_text)
+        return "".join(text_parts)
+
+    return ""
+
+
+def _accumulate_tool_call_args(chunk: Any, buffers: dict[int, str]) -> None:
+    tool_call_chunks = getattr(chunk, "tool_call_chunks", None) or []
+    for tool_chunk in tool_call_chunks:
+        if isinstance(tool_chunk, dict):
+            name = tool_chunk.get("name")
+            index = tool_chunk.get("index")
+            args_piece = tool_chunk.get("args")
+        else:
+            name = getattr(tool_chunk, "name", None)
+            index = getattr(tool_chunk, "index", None)
+            args_piece = getattr(tool_chunk, "args", None)
+
+        if name not in (None, "", "CitationTool"):
+            continue
+        if isinstance(args_piece, dict):
+            args_piece = json.dumps(args_piece)
+        if not isinstance(args_piece, str) or not args_piece:
+            continue
+
+        key = index if isinstance(index, int) else 0
+        buffers[key] = f"{buffers.get(key, '')}{args_piece}"
+
+
+def _parse_citations_from_buffers(buffers: dict[int, str]) -> list[Citation]:
+    parsed_citations: list[Citation] = []
+    for key in sorted(buffers):
+        raw_args = buffers[key].strip()
+        if not raw_args:
+            continue
+
+        try:
+            payload = json.loads(raw_args)
+        except json.JSONDecodeError:
+            continue
+
+        try:
+            tool_payload = CitationTool.model_validate(payload)
+        except ValidationError:
+            if isinstance(payload, list):
+                try:
+                    tool_payload = CitationTool.model_validate({"citations": payload})
+                except ValidationError:
+                    continue
+            else:
+                continue
+
+        parsed_citations.extend(tool_payload.citations)
+
+    return parsed_citations
+
+
+async def stream_answer_events(
     query: str, retrieved_docs: list[Document]
-) -> AsyncIterator[str]:
+) -> AsyncIterator[dict[str, Any]]:
     context = _format_context(retrieved_docs)
-    chain = _prompt | _llm
+    chain = _stream_prompt | _tool_llm
+    answer_parts: list[str] = []
+    tool_call_argument_buffers: dict[int, str] = {}
 
     async for chunk in chain.astream({"context": context, "query": query}):
-        content = getattr(chunk, "content", "")
-        if isinstance(content, str) and content:
-            yield content
+        token = _extract_text_from_chunk(chunk)
+        if token:
+            answer_parts.append(token)
+            yield {"type": "token", "token": token}
+
+        _accumulate_tool_call_args(chunk, tool_call_argument_buffers)
+
+    citations = _parse_citations_from_buffers(tool_call_argument_buffers)
+    response = ChatResponse(answer="".join(answer_parts), citations=citations)
+    yield {"type": "final", "payload": response.model_dump(mode="json")}
