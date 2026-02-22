@@ -1,6 +1,6 @@
 import asyncio
-from uuid import uuid4
 from typing import Any
+from uuid import uuid4
 
 try:
     from langchain.retrievers import EnsembleRetriever
@@ -13,11 +13,8 @@ try:
     from langchain_community.retrievers import BM25Retriever
 except ImportError:  # pragma: no cover
     from langchain.retrievers import BM25Retriever
+from langchain_core.embeddings import Embeddings
 from langchain_core.documents import Document
-try:
-    from langchain_openai import OpenAIEmbeddings
-except ImportError:  # pragma: no cover
-    from langchain.embeddings import OpenAIEmbeddings
 
 try:
     from langchain_chroma import Chroma
@@ -33,7 +30,7 @@ _bm25_documents: list[Document] = []
 _settings = get_settings()
 
 
-def _new_vector_store(embeddings: OpenAIEmbeddings | None = None) -> Chroma:
+def _new_vector_store(embeddings: Embeddings | None = None) -> Chroma:
     kwargs: dict[str, Any] = {
         "collection_name": "documind",
         "persist_directory": _settings.chroma_persist_dir,
@@ -44,7 +41,7 @@ def _new_vector_store(embeddings: OpenAIEmbeddings | None = None) -> Chroma:
     return Chroma(**kwargs)
 
 
-def _add_documents(chunks: list[Document], embeddings: OpenAIEmbeddings) -> None:
+def _add_documents(chunks: list[Document], embeddings: Embeddings) -> None:
     if not chunks:
         return
 
@@ -66,34 +63,45 @@ def _add_documents(chunks: list[Document], embeddings: OpenAIEmbeddings) -> None
 
 
 async def add_documents_to_store(
-    chunks: list[Document], embeddings: OpenAIEmbeddings
+    chunks: list[Document], embeddings: Embeddings
 ) -> None:
     await asyncio.to_thread(_add_documents, chunks, embeddings)
 
 
 def _build_hybrid_retriever(
-    embeddings: OpenAIEmbeddings,
+    embeddings: Embeddings,
+    dense_k: int,
+    bm25_k: int,
+    dense_weight: float,
 ) -> EnsembleRetriever | None:
     if not _bm25_documents:
         return None
 
-    dense_retriever = _new_vector_store(embeddings).as_retriever(search_kwargs={"k": 3})
+    dense_retriever = _new_vector_store(embeddings).as_retriever(
+        search_kwargs={"k": dense_k}
+    )
     bm25_retriever = BM25Retriever.from_documents(_bm25_documents)
-    bm25_retriever.k = 3
+    bm25_retriever.k = bm25_k
 
     return EnsembleRetriever(
         retrievers=[dense_retriever, bm25_retriever],
-        weights=[0.5, 0.5],
+        weights=[dense_weight, 1 - dense_weight],
     )
 
 
 def get_hybrid_retriever(
-    chunks_for_bm25: list[Document], embeddings: OpenAIEmbeddings
+    chunks_for_bm25: list[Document],
+    embeddings: Embeddings,
+    dense_k: int = 3,
+    bm25_k: int = 3,
+    dense_weight: float = 0.5,
 ) -> EnsembleRetriever:
     if chunks_for_bm25:
         _bm25_documents.extend(chunks_for_bm25)
 
-    hybrid_retriever = _build_hybrid_retriever(embeddings)
+    hybrid_retriever = _build_hybrid_retriever(
+        embeddings, dense_k, bm25_k, dense_weight
+    )
     if hybrid_retriever is None:
         raise RuntimeError("Hybrid retriever is not initialized. Upload documents first.")
 
@@ -138,14 +146,26 @@ async def initialize_retriever_from_disk() -> None:
     await asyncio.to_thread(_initialize_retriever_from_disk)
 
 
-def _retrieve_documents(query: str, embeddings: OpenAIEmbeddings) -> list[Document]:
-    retriever = _build_hybrid_retriever(embeddings)
+def _retrieve_documents(
+    query: str,
+    embeddings: Embeddings,
+    dense_k: int,
+    bm25_k: int,
+    dense_weight: float,
+) -> list[Document]:
+    retriever = _build_hybrid_retriever(embeddings, dense_k, bm25_k, dense_weight)
     if retriever is None:
         raise RuntimeError("Hybrid retriever is not initialized. Upload documents first.")
     return retriever.invoke(query)
 
 
 async def retrieve_documents(
-    query: str, embeddings: OpenAIEmbeddings
+    query: str,
+    embeddings: Embeddings,
+    dense_k: int = 3,
+    bm25_k: int = 3,
+    dense_weight: float = 0.5,
 ) -> list[Document]:
-    return await asyncio.to_thread(_retrieve_documents, query, embeddings)
+    return await asyncio.to_thread(
+        _retrieve_documents, query, embeddings, dense_k, bm25_k, dense_weight
+    )

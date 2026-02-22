@@ -1,11 +1,13 @@
 import json
+import re
 from collections.abc import AsyncIterator
 from typing import Any
+from uuid import UUID
 
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.documents import Document
 from langchain_core.messages import BaseMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, ValidationError
 
 from schemas import ChatResponse, Citation
@@ -40,6 +42,18 @@ def _format_context(retrieved_docs: list[Document]) -> str:
         )
 
     return "\n\n".join(sections)
+
+
+def _sanitize_answer_text(answer: str) -> str:
+    citation_tool_index = re.search(r"\bCitationTool\b", answer, re.IGNORECASE)
+    if citation_tool_index:
+        answer = answer[: citation_tool_index.start()]
+
+    return answer.strip()
+
+
+def _contains_citation_tool_marker(answer: str) -> bool:
+    return re.search(r"\bCitationTool\b", answer, re.IGNORECASE) is not None
 
 
 class CitationTool(BaseModel):
@@ -117,7 +131,7 @@ _reformulation_prompt = ChatPromptTemplate.from_messages(
 
 
 async def generate_answer(
-    query: str, retrieved_docs: list[Document], llm: ChatOpenAI
+    query: str, retrieved_docs: list[Document], llm: BaseChatModel
 ) -> ChatResponse:
     context = _format_context(retrieved_docs)
     structured_llm = llm.with_structured_output(ChatResponse, method="function_calling")
@@ -125,9 +139,12 @@ async def generate_answer(
     result = await chain.ainvoke({"context": context, "query": query})
 
     if isinstance(result, ChatResponse):
+        result.answer = _sanitize_answer_text(result.answer)
         return result
 
-    return ChatResponse.model_validate(result)
+    validated = ChatResponse.model_validate(result)
+    validated.answer = _sanitize_answer_text(validated.answer)
+    return validated
 
 
 def _extract_text_from_content(content: Any) -> str:
@@ -154,7 +171,7 @@ def _extract_text_from_chunk(chunk: Any) -> str:
 
 
 async def reformulate_query(
-    raw_query: str, chat_history: list[BaseMessage], llm: ChatOpenAI
+    raw_query: str, chat_history: list[BaseMessage], llm: BaseChatModel
 ) -> str:
     if not chat_history:
         return raw_query
@@ -216,28 +233,120 @@ def _parse_citations_from_buffers(buffers: dict[int, str]) -> list[Citation]:
     return parsed_citations
 
 
+def _coerce_document_id(raw_id: Any) -> str:
+    if raw_id is None:
+        return "00000000-0000-0000-0000-000000000000"
+
+    value = str(raw_id).strip()
+    if not value:
+        return "00000000-0000-0000-0000-000000000000"
+
+    try:
+        return str(UUID(value))
+    except ValueError:
+        return "00000000-0000-0000-0000-000000000000"
+
+
+def _coerce_page_number(raw_page: Any) -> int:
+    try:
+        return int(raw_page)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _fallback_citations_from_docs(
+    retrieved_docs: list[Document], max_items: int = 3
+) -> list[Citation]:
+    fallback_citations: list[Citation] = []
+    for doc in retrieved_docs[:max_items]:
+        snippet = doc.page_content.strip()
+        if not snippet:
+            continue
+
+        metadata = doc.metadata or {}
+        citation_payload = {
+            "source_text": snippet[:600],
+            "metadata": {
+                "document_id": _coerce_document_id(
+                    metadata.get("document_id") or metadata.get("chunk_id")
+                ),
+                "filename": str(
+                    metadata.get("filename") or metadata.get("source") or "unknown"
+                ),
+                "page_number": _coerce_page_number(
+                    metadata.get("page_number") or metadata.get("page")
+                ),
+            },
+        }
+        fallback_citations.append(Citation.model_validate(citation_payload))
+
+    return fallback_citations
+
+
 async def stream_answer_events(
     query: str,
     retrieved_docs: list[Document],
     chat_history: list[BaseMessage],
-    llm: ChatOpenAI,
+    llm: BaseChatModel,
 ) -> AsyncIterator[dict[str, Any]]:
     context = _format_context(retrieved_docs)
     tool_llm = llm.bind_tools([CitationTool])
     chain = _stream_prompt | tool_llm
-    answer_parts: list[str] = []
     tool_call_argument_buffers: dict[int, str] = {}
+    fallback_citations = _fallback_citations_from_docs(retrieved_docs)
+    streamed_text_buffer = ""
+    emitted_length = 0
+    marker_guard_length = len("CitationTool") - 1
 
-    async for chunk in chain.astream(
-        {"chat_history": chat_history, "context": context, "query": query}
-    ):
-        token = _extract_text_from_chunk(chunk)
-        if token:
-            answer_parts.append(token)
-            yield {"type": "token", "token": token}
+    try:
+        async for chunk in chain.astream(
+            {"chat_history": chat_history, "context": context, "query": query}
+        ):
+            token = _extract_text_from_chunk(chunk)
+            if token:
+                streamed_text_buffer += token
+                clean_text = _sanitize_answer_text(streamed_text_buffer)
+                marker_found = _contains_citation_tool_marker(streamed_text_buffer)
+                safe_target_length = (
+                    len(clean_text)
+                    if marker_found
+                    else max(0, len(clean_text) - marker_guard_length)
+                )
 
-        _accumulate_tool_call_args(chunk, tool_call_argument_buffers)
+                if safe_target_length > emitted_length:
+                    safe_token = clean_text[emitted_length:safe_target_length]
+                    if safe_token:
+                        yield {"type": "token", "token": safe_token}
+                    emitted_length = safe_target_length
+
+            _accumulate_tool_call_args(chunk, tool_call_argument_buffers)
+    except Exception:
+        fallback_answer = _sanitize_answer_text(streamed_text_buffer)
+        if fallback_answer:
+            response = ChatResponse(
+                answer=fallback_answer,
+                citations=fallback_citations,
+            )
+            yield {"type": "final", "payload": response.model_dump(mode="json")}
+            return
+        raise
 
     citations = _parse_citations_from_buffers(tool_call_argument_buffers)
-    response = ChatResponse(answer="".join(answer_parts), citations=citations)
+    final_answer = _sanitize_answer_text(streamed_text_buffer)
+    if not final_answer.strip():
+        try:
+            fallback_response = await generate_answer(query, retrieved_docs, llm)
+            final_answer = _sanitize_answer_text(fallback_response.answer)
+            if not citations:
+                citations = fallback_response.citations
+        except Exception:
+            final_answer = (
+                "I can provide citations for the answer, but the response text "
+                "could not be streamed for this provider."
+            )
+
+    response = ChatResponse(
+        answer=final_answer,
+        citations=citations or fallback_citations,
+    )
     yield {"type": "final", "payload": response.model_dump(mode="json")}

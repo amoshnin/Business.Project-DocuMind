@@ -1,19 +1,29 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bot, Settings, Sparkles } from "lucide-react";
+import Link from "next/link";
+import { Bot, BookOpenText, Settings, SlidersHorizontal, Sparkles } from "lucide-react";
 
 import { ChatInterface } from "@/components/ChatInterface";
 import { DocumentPanel } from "@/components/DocumentPanel";
+import { RuntimeConfigModal } from "@/components/RuntimeConfigModal";
 import { SettingsModal } from "@/components/SettingsModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { DOCUMIND_AUTH_ERROR_EVENT } from "@/lib/api-client";
+import { getUserApiKey } from "@/lib/api-key";
 import { Citation } from "@/lib/citations";
+import { getModelProvider, type ModelProvider } from "@/lib/model-provider";
 
 export default function Home() {
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isRuntimeConfigOpen, setIsRuntimeConfigOpen] = useState(false);
+  const [chatSessionKey, setChatSessionKey] = useState(0);
+  const [isCurrentSessionUsed, setIsCurrentSessionUsed] = useState(false);
+  const [modelProvider, setModelProvider] = useState<ModelProvider>("groq");
+  const [hasApiKey, setHasApiKey] = useState(false);
+  const [isDocumentReady, setIsDocumentReady] = useState(false);
   const [settingsErrorMessage, setSettingsErrorMessage] = useState<
     string | null
   >(null);
@@ -23,8 +33,10 @@ export default function Home() {
       const customEvent = event as CustomEvent<{ message?: string }>;
       setSettingsErrorMessage(
         customEvent.detail?.message ??
-          "Unauthorized request. Please update your API key.",
+          "Unauthorized request. Please review AI Engine settings.",
       );
+      setModelProvider(getModelProvider());
+      setHasApiKey(false);
       setIsSettingsModalOpen(true);
     };
 
@@ -34,11 +46,42 @@ export default function Home() {
     };
   }, []);
 
+  useEffect(() => {
+    const syncFromStorage = () => {
+      setModelProvider(getModelProvider());
+      setHasApiKey(Boolean(getUserApiKey()));
+    };
+    const syncTimeout = window.setTimeout(syncFromStorage, 0);
+    return () => window.clearTimeout(syncTimeout);
+  }, []);
+
   const onSettingsModalChange = (open: boolean) => {
     setIsSettingsModalOpen(open);
     if (!open) {
       setSettingsErrorMessage(null);
+      setModelProvider(getModelProvider());
+      setHasApiKey(Boolean(getUserApiKey()));
     }
+  };
+
+  const requiresOpenAIKey = modelProvider === "openai";
+  const canSendMessages = (requiresOpenAIKey ? hasApiKey : true) && isDocumentReady;
+  const selectedEngineLabel =
+    modelProvider === "openai" ? "OpenAI · GPT-4o" : "Groq · Llama 3";
+
+  const chatBlockedReason =
+    requiresOpenAIKey && !hasApiKey && !isDocumentReady
+      ? "OpenAI is selected. Add your API key and upload a PDF to continue."
+      : requiresOpenAIKey && !hasApiKey
+        ? "OpenAI is selected. Add your API key in Settings to continue."
+        : !isDocumentReady
+          ? "Upload a PDF document before sending questions."
+          : null;
+
+  const startNewSession = () => {
+    setChatSessionKey((current) => current + 1);
+    setIsCurrentSessionUsed(false);
+    setActiveCitation(null);
   };
 
   return (
@@ -56,6 +99,9 @@ export default function Home() {
               <span className="hidden text-xs text-muted-foreground lg:inline">
                 Lead Software Engineer: Artem Moshnin
               </span>
+              <span className="hidden items-center rounded-md border bg-muted/40 px-2.5 py-1 text-xs font-medium text-muted-foreground sm:inline-flex">
+                Engine: {selectedEngineLabel}
+              </span>
               <Button
                 variant="outline"
                 size="sm"
@@ -65,12 +111,28 @@ export default function Home() {
                 }}
               >
                 <Settings className="size-4" />
-                API Key
+                AI Engine
               </Button>
-              <Button variant="outline" size="sm">
-                <Sparkles className="size-4" />
-                New Session
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsRuntimeConfigOpen(true)}
+              >
+                <SlidersHorizontal className="size-4" />
+                RAG Config
               </Button>
+              <Button asChild variant="outline" size="sm">
+                <Link href="/architecture">
+                  <BookOpenText className="size-4" />
+                  Architecture
+                </Link>
+              </Button>
+              {isCurrentSessionUsed ? (
+                <Button variant="outline" size="sm" onClick={startNewSession}>
+                  <Sparkles className="size-4" />
+                  New Session
+                </Button>
+              ) : null}
               <ThemeToggle />
             </div>
           </div>
@@ -78,16 +140,31 @@ export default function Home() {
 
         <main className="mx-auto grid min-h-0 w-full max-w-[1600px] flex-1 grid-cols-1 gap-4 p-4 md:grid-cols-[3fr_2fr] lg:gap-6 lg:p-6">
           <ChatInterface
+            key={chatSessionKey}
             activeCitation={activeCitation}
             onActiveCitationChange={setActiveCitation}
+            canSendMessages={canSendMessages}
+            blockedReason={chatBlockedReason}
+            onSessionUsedChange={setIsCurrentSessionUsed}
           />
-          <DocumentPanel activeCitation={activeCitation} />
+          <DocumentPanel
+            activeCitation={activeCitation}
+            onDocumentReadyChange={setIsDocumentReady}
+          />
         </main>
-        <SettingsModal
-          open={isSettingsModalOpen}
-          onOpenChange={onSettingsModalChange}
-          errorMessage={settingsErrorMessage}
-        />
+        {isSettingsModalOpen ? (
+          <SettingsModal
+            open={isSettingsModalOpen}
+            onOpenChange={onSettingsModalChange}
+            errorMessage={settingsErrorMessage}
+          />
+        ) : null}
+        {isRuntimeConfigOpen ? (
+          <RuntimeConfigModal
+            open={isRuntimeConfigOpen}
+            onOpenChange={setIsRuntimeConfigOpen}
+          />
+        ) : null}
       </div>
     </div>
   );

@@ -39,9 +39,13 @@ const BACKEND_UPLOAD_ENDPOINT = `${API_BASE_URL}/api/v1/documents/upload`;
 
 type DocumentPanelProps = {
   activeCitation: Citation | null;
+  onDocumentReadyChange?: (ready: boolean) => void;
 };
 
-export function DocumentPanel({ activeCitation }: DocumentPanelProps) {
+export function DocumentPanel({
+  activeCitation,
+  onDocumentReadyChange,
+}: DocumentPanelProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const chunkingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -106,10 +110,12 @@ export function DocumentPanel({ activeCitation }: DocumentPanelProps) {
         indexedChunks: getIndexedChunks(payload),
       });
       setStage("ready");
+      onDocumentReadyChange?.(true);
     } catch (error) {
       clearChunkingTimer();
       setStage("error");
       setUploadedDocument(null);
+      onDocumentReadyChange?.(false);
       setErrorMessage(
         error instanceof Error ? error.message : "Unexpected upload error.",
       );
@@ -122,6 +128,7 @@ export function DocumentPanel({ activeCitation }: DocumentPanelProps) {
 
     if (file.type !== "application/pdf") {
       setStage("error");
+      onDocumentReadyChange?.(false);
       setErrorMessage("Only PDF files are supported.");
       event.target.value = "";
       return;
@@ -140,6 +147,7 @@ export function DocumentPanel({ activeCitation }: DocumentPanelProps) {
 
     if (file.type !== "application/pdf") {
       setStage("error");
+      onDocumentReadyChange?.(false);
       setErrorMessage("Only PDF files are supported.");
       return;
     }
