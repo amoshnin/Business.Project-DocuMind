@@ -1,12 +1,5 @@
 # DocuMind: Enterprise RAG Knowledge Engine
 
-![Build Status](https://img.shields.io/badge/build-passing-brightgreen)
-![License](https://img.shields.io/badge/license-MIT-blue)
-![Python 3.11](https://img.shields.io/badge/python-3.11-3776AB?logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)
-![Next.js](https://img.shields.io/badge/Next.js-App%20Router-000000?logo=next.js&logoColor=white)
-![OpenAI](https://img.shields.io/badge/OpenAI-GPT--4o--mini-412991?logo=openai&logoColor=white)
-
 ## Overview
 
 DocuMind is a full-stack, context-aware, hallucination-resistant Retrieval-Augmented Generation (RAG) platform engineered for high-stakes document analysis. The system provides an end-to-end pipeline from PDF ingestion and metadata-preserving chunking, through hybrid dense+sparse retrieval, to multi-turn conversational answering with streaming generation. Responses are emitted with low perceived latency (sub-second TTFT in local deployments) and include verifiable, page-level citations so every generated claim can be traced back to source evidence.
