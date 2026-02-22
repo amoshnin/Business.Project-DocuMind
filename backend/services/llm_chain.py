@@ -3,7 +3,8 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from langchain_core.documents import Document
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.messages import BaseMessage
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, ValidationError
 
@@ -59,6 +60,12 @@ class CitationTool(BaseModel):
 
 _tool_llm = _llm.bind_tools([CitationTool])
 
+_reformulation_llm = ChatOpenAI(
+    model="gpt-4o-mini",
+    temperature=0,
+    api_key=settings.openai_api_key,
+)
+
 _prompt = ChatPromptTemplate.from_messages(
     [
         (
@@ -106,10 +113,26 @@ _stream_prompt = ChatPromptTemplate.from_messages(
                 "and call CitationTool with an empty citations list."
             ),
         ),
+        MessagesPlaceholder("chat_history"),
         (
             "human",
             "Context:\n{context}\n\nUser question:\n{query}",
         ),
+    ]
+)
+
+_reformulation_prompt = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            (
+                "Given the chat history and the latest user query, formulate a "
+                "standalone query that can be understood without the chat history. "
+                "Do NOT answer the question, just reformulate it."
+            ),
+        ),
+        MessagesPlaceholder("chat_history"),
+        ("human", "Latest user query:\n{raw_query}"),
     ]
 )
 
@@ -125,8 +148,7 @@ async def generate_answer(query: str, retrieved_docs: list[Document]) -> ChatRes
     return ChatResponse.model_validate(result)
 
 
-def _extract_text_from_chunk(chunk: Any) -> str:
-    content = getattr(chunk, "content", "")
+def _extract_text_from_content(content: Any) -> str:
     if isinstance(content, str):
         return content
 
@@ -142,6 +164,21 @@ def _extract_text_from_chunk(chunk: Any) -> str:
         return "".join(text_parts)
 
     return ""
+
+
+def _extract_text_from_chunk(chunk: Any) -> str:
+    content = getattr(chunk, "content", "")
+    return _extract_text_from_content(content)
+
+
+async def reformulate_query(raw_query: str, chat_history: list[BaseMessage]) -> str:
+    if not chat_history:
+        return raw_query
+
+    chain = _reformulation_prompt | _reformulation_llm
+    result = await chain.ainvoke({"chat_history": chat_history, "raw_query": raw_query})
+    reformulated = _extract_text_from_content(getattr(result, "content", "")).strip()
+    return reformulated or raw_query
 
 
 def _accumulate_tool_call_args(chunk: Any, buffers: dict[int, str]) -> None:
@@ -196,14 +233,16 @@ def _parse_citations_from_buffers(buffers: dict[int, str]) -> list[Citation]:
 
 
 async def stream_answer_events(
-    query: str, retrieved_docs: list[Document]
+    query: str, retrieved_docs: list[Document], chat_history: list[BaseMessage]
 ) -> AsyncIterator[dict[str, Any]]:
     context = _format_context(retrieved_docs)
     chain = _stream_prompt | _tool_llm
     answer_parts: list[str] = []
     tool_call_argument_buffers: dict[int, str] = {}
 
-    async for chunk in chain.astream({"context": context, "query": query}):
+    async for chunk in chain.astream(
+        {"chat_history": chat_history, "context": context, "query": query}
+    ):
         token = _extract_text_from_chunk(chunk)
         if token:
             answer_parts.append(token)
