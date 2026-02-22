@@ -1,15 +1,30 @@
 import asyncio
 from uuid import uuid4
 
-from langchain.retrievers import EnsembleRetriever
-from langchain_community.retrievers import BM25Retriever
+try:
+    from langchain.retrievers import EnsembleRetriever
+except ImportError:  # pragma: no cover
+    try:
+        from langchain.retrievers.ensemble import EnsembleRetriever
+    except ImportError:  # pragma: no cover
+        from langchain_classic.retrievers import EnsembleRetriever
+try:
+    from langchain_community.retrievers import BM25Retriever
+except ImportError:  # pragma: no cover
+    from langchain.retrievers import BM25Retriever
 from langchain_core.documents import Document
-from langchain_openai import OpenAIEmbeddings
+try:
+    from langchain_openai import OpenAIEmbeddings
+except ImportError:  # pragma: no cover
+    from langchain.embeddings import OpenAIEmbeddings
 
 try:
     from langchain_chroma import Chroma
 except ImportError:  # pragma: no cover
-    from langchain_community.vectorstores import Chroma
+    try:
+        from langchain_community.vectorstores import Chroma
+    except ImportError:  # pragma: no cover
+        from langchain.vectorstores import Chroma
 
 from config import get_settings
 
