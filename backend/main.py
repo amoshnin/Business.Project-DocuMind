@@ -37,13 +37,13 @@ except Exception:  # pragma: no cover
         pass
 
 from config import get_settings
-from services.document_processor import process_pdf
 from schemas import ChatRequest, ChatResponse
 from services.llm_chain import generate_answer, reformulate_query, stream_answer_events
 from services.retriever import (
     add_documents_to_store,
     get_hybrid_retriever,
     initialize_retriever_from_disk,
+    maybe_add_documents_to_bm25,
     retrieve_documents,
 )
 
@@ -246,11 +246,13 @@ async def _warm_retriever_cache() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     print("DocuMind startup: app initialization complete")
-    warmup_task = asyncio.create_task(_warm_retriever_cache())
+    warmup_task: asyncio.Task[None] | None = None
+    if settings.documind_bm25_enabled and settings.documind_warm_retriever_on_startup:
+        warmup_task = asyncio.create_task(_warm_retriever_cache())
     try:
         yield
     finally:
-        if not warmup_task.done():
+        if warmup_task is not None and not warmup_task.done():
             warmup_task.cancel()
             with suppress(asyncio.CancelledError):
                 await warmup_task
@@ -285,6 +287,7 @@ async def upload_document(
     runtime_config: RuntimeConfig = Depends(get_runtime_config),
 ) -> dict[str, int | str]:
     _provider, _openai_key = provider_ctx
+    from services.document_processor import process_pdf
 
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required.")
@@ -303,13 +306,7 @@ async def upload_document(
     try:
         if chunks:
             await add_documents_to_store(chunks, embeddings)
-            get_hybrid_retriever(
-                chunks,
-                embeddings,
-                dense_k=runtime_config.dense_k,
-                bm25_k=runtime_config.bm25_k,
-                dense_weight=runtime_config.dense_weight,
-            )
+            maybe_add_documents_to_bm25(chunks)
     except OpenAIAuthenticationError as exc:
         raise HTTPException(status_code=401, detail=INVALID_KEY_DETAIL) from exc
 
