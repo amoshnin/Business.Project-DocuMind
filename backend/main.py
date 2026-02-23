@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import json
 from collections.abc import AsyncIterator
@@ -8,10 +10,6 @@ from importlib import import_module
 from fastapi import Depends, FastAPI, File, HTTPException, Header, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from langchain_core.embeddings import Embeddings
-from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
 try:
@@ -38,14 +36,6 @@ except Exception:  # pragma: no cover
 
 from config import get_settings
 from schemas import ChatRequest, ChatResponse
-from services.llm_chain import generate_answer, reformulate_query, stream_answer_events
-from services.retriever import (
-    add_documents_to_store,
-    get_hybrid_retriever,
-    initialize_retriever_from_disk,
-    maybe_add_documents_to_bm25,
-    retrieve_documents,
-)
 
 settings = get_settings()
 PROVIDER_GROQ = "groq"
@@ -160,6 +150,8 @@ def get_llm(
     openai_key: str | None = None,
     runtime_config: RuntimeConfig | None = None,
 ) -> BaseChatModel:
+    from langchain_openai import ChatOpenAI
+
     temperature = (
         runtime_config.temperature if runtime_config is not None else DEFAULT_TEMPERATURE
     )
@@ -236,16 +228,18 @@ def get_embeddings_model() -> Embeddings:
 
 
 async def _warm_retriever_cache() -> None:
+    from services.retriever import initialize_retriever_from_disk
+
     try:
         await asyncio.wait_for(initialize_retriever_from_disk(), timeout=20)
-        print("DocuMind startup: retriever warmup completed")
+        print("DocuMind startup: retriever warmup completed", flush=True)
     except Exception:
-        print("DocuMind startup: retriever warmup skipped")
+        print("DocuMind startup: retriever warmup skipped", flush=True)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    print("DocuMind startup: app initialization complete")
+    print("DocuMind startup: app initialization complete", flush=True)
     warmup_task: asyncio.Task[None] | None = None
     if settings.documind_bm25_enabled and settings.documind_warm_retriever_on_startup:
         warmup_task = asyncio.create_task(_warm_retriever_cache())
@@ -288,6 +282,7 @@ async def upload_document(
 ) -> dict[str, int | str]:
     _provider, _openai_key = provider_ctx
     from services.document_processor import process_pdf
+    from services.retriever import add_documents_to_store, maybe_add_documents_to_bm25
 
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required.")
@@ -326,6 +321,9 @@ async def chat(
     runtime_config: RuntimeConfig = Depends(get_runtime_config),
 ) -> ChatResponse:
     provider, openai_key = provider_ctx
+    from services.llm_chain import generate_answer
+    from services.retriever import retrieve_documents
+
     embeddings = get_embeddings_model()
     try:
         llm = get_llm(provider, openai_key, runtime_config)
@@ -368,6 +366,9 @@ async def chat_stream(
     runtime_config: RuntimeConfig = Depends(get_runtime_config),
 ) -> StreamingResponse:
     provider, openai_key = provider_ctx
+    from services.llm_chain import reformulate_query, stream_answer_events
+    from services.retriever import retrieve_documents
+
     session_id = str(request.session_id)
     chat_history = session_store.get(session_id, [])
     retrieval_query = request.query
@@ -446,6 +447,8 @@ async def chat_stream(
                 yield f"data: {json.dumps(event)}\n\n"
 
             history = session_store.setdefault(session_id, [])
+            from langchain_core.messages import AIMessage, HumanMessage
+
             history.append(HumanMessage(content=request.query))
             history.append(AIMessage(content=final_answer))
             yield "data: [DONE]\n\n"

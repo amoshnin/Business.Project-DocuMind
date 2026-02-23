@@ -3,20 +3,9 @@ from typing import Any
 from uuid import uuid4
 
 try:
-    from langchain.retrievers import EnsembleRetriever
-except ImportError:  # pragma: no cover
-    try:
-        from langchain.retrievers.ensemble import EnsembleRetriever
-    except ImportError:  # pragma: no cover
-        from langchain_classic.retrievers import EnsembleRetriever
-try:
     from langchain_core.retrievers import BaseRetriever
 except Exception:  # pragma: no cover
     BaseRetriever = object  # type: ignore[assignment]
-try:
-    from langchain_community.retrievers import BM25Retriever
-except ImportError:  # pragma: no cover
-    from langchain.retrievers import BM25Retriever
 from langchain_core.embeddings import Embeddings
 from langchain_core.documents import Document
 
@@ -25,6 +14,8 @@ from config import get_settings
 _bm25_documents: list[Document] = []
 _settings = get_settings()
 _chroma_class: type | None = None
+_ensemble_retriever_class: type | None = None
+_bm25_retriever_class: type | None = None
 _store_has_docs: bool | None = None
 
 
@@ -43,6 +34,41 @@ def _get_chroma_class() -> type:
 
     _chroma_class = ChromaClass
     return _chroma_class
+
+
+def _get_ensemble_retriever_class() -> type:
+    global _ensemble_retriever_class
+    if _ensemble_retriever_class is not None:
+        return _ensemble_retriever_class
+
+    try:
+        from langchain.retrievers import EnsembleRetriever as EnsembleRetrieverClass
+    except ImportError:  # pragma: no cover
+        try:
+            from langchain.retrievers.ensemble import (
+                EnsembleRetriever as EnsembleRetrieverClass,
+            )
+        except ImportError:  # pragma: no cover
+            from langchain_classic.retrievers import (
+                EnsembleRetriever as EnsembleRetrieverClass,
+            )
+
+    _ensemble_retriever_class = EnsembleRetrieverClass
+    return _ensemble_retriever_class
+
+
+def _get_bm25_retriever_class() -> type:
+    global _bm25_retriever_class
+    if _bm25_retriever_class is not None:
+        return _bm25_retriever_class
+
+    try:
+        from langchain_community.retrievers import BM25Retriever as BM25RetrieverClass
+    except ImportError:  # pragma: no cover
+        from langchain.retrievers import BM25Retriever as BM25RetrieverClass
+
+    _bm25_retriever_class = BM25RetrieverClass
+    return _bm25_retriever_class
 
 
 def _new_vector_store(embeddings: Embeddings | None = None) -> Any:
@@ -148,6 +174,8 @@ def _build_hybrid_retriever(
     if not _settings.documind_bm25_enabled or not _bm25_documents:
         return dense_retriever
 
+    BM25Retriever = _get_bm25_retriever_class()
+    EnsembleRetriever = _get_ensemble_retriever_class()
     bm25_retriever = BM25Retriever.from_documents(_bm25_documents)
     bm25_retriever.k = bm25_k
 
