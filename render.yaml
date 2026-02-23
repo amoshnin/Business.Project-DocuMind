@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: documind-backend
+    env: python
+    plan: starter
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: CHROMA_PERSIST_DIR
+        value: /var/data/chroma
+      - key: CHUNK_SIZE
+        value: "1000"
+      - key: GROQ_API_KEY
+        sync: false
+    disk:
+      name: chroma-data
+      mountPath: /var/data
+      sizeGB: 1
