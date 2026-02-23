@@ -5,7 +5,7 @@ const API_BASE_URL =
 const CHAT_STREAM_ENDPOINT = `${API_BASE_URL}/api/v1/chat/stream`;
 const SESSION_STORAGE_KEY = "documind_session_id";
 
-function getSessionId(): string {
+export function getSessionId(): string {
   if (typeof window === "undefined") {
     return "00000000-0000-0000-0000-000000000000";
   }

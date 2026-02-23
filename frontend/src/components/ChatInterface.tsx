@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Loader2, Send } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 
@@ -14,7 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { submitQuery } from "@/lib/chat-api";
+import { getSessionId, submitQuery } from "@/lib/chat-api";
 import {
   Citation,
   getCitationBadgeLabel,
@@ -44,6 +44,7 @@ const INITIAL_MESSAGES: ChatMessage[] = [
       "Welcome to **DocuMind**. Upload a document and ask a question to start a grounded analysis.",
   },
 ];
+const CHAT_HISTORY_STORAGE_PREFIX = "documind_messages_";
 
 type ChatInterfaceProps = {
   activeCitation: Citation | null;
@@ -61,9 +62,36 @@ export function ChatInterface({
   onSessionUsedChange,
 }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
+  const [historyHydrated, setHistoryHydrated] = useState(false);
   const [draft, setDraft] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const historyKey = `${CHAT_HISTORY_STORAGE_PREFIX}${getSessionId()}`;
+    const rawHistory = window.localStorage.getItem(historyKey);
+    if (rawHistory) {
+      try {
+        const parsed = JSON.parse(rawHistory) as ChatMessage[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setMessages(parsed);
+        }
+      } catch {
+        window.localStorage.removeItem(historyKey);
+      }
+    }
+
+    setHistoryHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!historyHydrated || typeof window === "undefined") return;
+
+    const historyKey = `${CHAT_HISTORY_STORAGE_PREFIX}${getSessionId()}`;
+    window.localStorage.setItem(historyKey, JSON.stringify(messages));
+  }, [messages, historyHydrated]);
 
   const appendTokenToAssistant = (token: string) => {
     setMessages((current) => {

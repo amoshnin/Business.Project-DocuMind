@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     groq_api_key: str | None = Field(default=None, alias="GROQ_API_KEY")
     groq_model: str = Field(default="llama-3.1-8b-instant", alias="GROQ_MODEL")
-    chroma_persist_dir: str = Field(alias="CHROMA_PERSIST_DIR")
+    chroma_persist_dir: str = Field(default="/var/data/chroma", alias="CHROMA_PERSIST_DIR")
     chunk_size: int = Field(default=1000, alias="CHUNK_SIZE")
 
 
