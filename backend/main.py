@@ -1,7 +1,9 @@
+import asyncio
 import json
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from functools import lru_cache
+from importlib import import_module
 
 from fastapi import Depends, FastAPI, File, HTTPException, Header, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -33,19 +35,6 @@ try:
 except Exception:  # pragma: no cover
     class GroqRateLimitError(Exception):
         pass
-
-try:
-    from langchain_groq import ChatGroq
-except Exception:  # pragma: no cover
-    ChatGroq = None
-
-try:
-    from langchain_huggingface import HuggingFaceEmbeddings
-except Exception:  # pragma: no cover
-    try:
-        from langchain_community.embeddings import HuggingFaceEmbeddings
-    except Exception:  # pragma: no cover
-        HuggingFaceEmbeddings = None
 
 from config import get_settings
 from services.document_processor import process_pdf
@@ -182,7 +171,9 @@ def get_llm(
             api_key=openai_key,
         )
 
-    if ChatGroq is None:
+    try:
+        ChatGroq = getattr(import_module("langchain_groq"), "ChatGroq")
+    except Exception:  # pragma: no cover
         return ChatOpenAI(
             model=settings.groq_model,
             temperature=temperature,
@@ -221,6 +212,20 @@ def map_provider_error(exc: Exception) -> HTTPException | None:
 
 @lru_cache
 def get_embeddings_model() -> Embeddings:
+    HuggingFaceEmbeddings: type[Embeddings] | None = None
+    try:
+        HuggingFaceEmbeddings = getattr(
+            import_module("langchain_huggingface"), "HuggingFaceEmbeddings"
+        )
+    except Exception:  # pragma: no cover
+        try:
+            HuggingFaceEmbeddings = getattr(
+                import_module("langchain_community.embeddings"),
+                "HuggingFaceEmbeddings",
+            )
+        except Exception:  # pragma: no cover
+            HuggingFaceEmbeddings = None
+
     if HuggingFaceEmbeddings is None:
         raise HTTPException(
             status_code=500,
@@ -230,10 +235,25 @@ def get_embeddings_model() -> Embeddings:
     return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
 
+async def _warm_retriever_cache() -> None:
+    try:
+        await asyncio.wait_for(initialize_retriever_from_disk(), timeout=20)
+        print("DocuMind startup: retriever warmup completed")
+    except Exception:
+        print("DocuMind startup: retriever warmup skipped")
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    await initialize_retriever_from_disk()
-    yield
+    print("DocuMind startup: app initialization complete")
+    warmup_task = asyncio.create_task(_warm_retriever_cache())
+    try:
+        yield
+    finally:
+        if not warmup_task.done():
+            warmup_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await warmup_task
 
 
 app = FastAPI(title="DocuMind API", lifespan=lifespan)
