@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Bot, BookOpenText, Settings, SlidersHorizontal, Sparkles } from "lucide-react";
 
 import { ChatInterface } from "@/components/ChatInterface";
+import { BackendStatusBanner } from "@/components/BackendStatusBanner";
 import { DocumentPanel } from "@/components/DocumentPanel";
 import { RuntimeConfigModal } from "@/components/RuntimeConfigModal";
 import { SettingsModal } from "@/components/SettingsModal";
@@ -12,6 +13,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { DOCUMIND_AUTH_ERROR_EVENT } from "@/lib/api-client";
 import { getUserApiKey } from "@/lib/api-key";
+import { ensureBackendWakeup } from "@/lib/backend-status";
 import { Citation } from "@/lib/citations";
 import { getModelProvider, type ModelProvider } from "@/lib/model-provider";
 
@@ -27,6 +29,10 @@ export default function Home() {
   const [settingsErrorMessage, setSettingsErrorMessage] = useState<
     string | null
   >(null);
+
+  useEffect(() => {
+    ensureBackendWakeup();
+  }, []);
 
   useEffect(() => {
     const handleAuthError = (event: Event) => {
@@ -86,6 +92,7 @@ export default function Home() {
 
   return (
     <div className="h-dvh overflow-hidden bg-background">
+      <BackendStatusBanner />
       <div className="flex h-full flex-col">
         <header className="border-b bg-card/70 backdrop-blur supports-[backdrop-filter]:bg-card/50">
           <div className="mx-auto flex h-14 w-full max-w-[1600px] items-center justify-between px-4 lg:px-6">

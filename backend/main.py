@@ -359,12 +359,8 @@ app.add_middleware(
 
 
 @app.get("/health")
-async def health() -> dict[str, str | bool]:
-    return {
-        "status": "ok",
-        "dense_retrieval_enabled": settings.documind_dense_enabled,
-        "bm25_enabled": settings.documind_bm25_enabled,
-    }
+async def health() -> dict[str, str]:
+    return {"status": "ok"}
 
 
 async def _run_document_upload_pipeline(

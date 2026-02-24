@@ -1,4 +1,9 @@
 import { clearUserApiKey, getUserApiKey } from "@/lib/api-key";
+import {
+  handleBackendRequestFailure,
+  handleBackendRequestStart,
+  handleBackendResponse,
+} from "@/lib/backend-status";
 import { getModelProvider } from "@/lib/model-provider";
 import { getRuntimeConfig } from "@/lib/runtime-config";
 
@@ -29,11 +34,21 @@ export async function apiFetch(
   input: RequestInfo | URL,
   init: RequestInit = {},
 ): Promise<Response> {
+  handleBackendRequestStart();
+
   const provider = getModelProvider();
-  const response = await fetch(input, {
-    ...init,
-    headers: withApiKeyHeader(init.headers),
-  });
+  let response: Response;
+  try {
+    response = await fetch(input, {
+      ...init,
+      headers: withApiKeyHeader(init.headers),
+    });
+  } catch (error) {
+    handleBackendRequestFailure(error);
+    throw error;
+  }
+
+  handleBackendResponse(response);
 
   if (response.status === 401) {
     if (provider === "openai") {
