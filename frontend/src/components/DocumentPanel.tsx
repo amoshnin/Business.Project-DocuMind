@@ -16,6 +16,11 @@ import { Separator } from "@/components/ui/separator";
 import { apiFetch } from "@/lib/api-client";
 import { getApiBaseUrl } from "@/lib/backend-url";
 import { Citation } from "@/lib/citations";
+import {
+  clearDocumentSessionState,
+  getDocumentSessionState,
+  setDocumentSessionState,
+} from "@/lib/document-session";
 import { cn } from "@/lib/utils";
 
 type UploadStage =
@@ -72,6 +77,10 @@ export function DocumentPanel({
   const [isDragActive, setIsDragActive] = useState(false);
   const [stage, setStage] = useState<UploadStage>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [processingFilename, setProcessingFilename] = useState<string | null>(null);
+  const [uploadStartedAt, setUploadStartedAt] = useState<number | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [currentUploadJobId, setCurrentUploadJobId] = useState<string | null>(null);
   const [uploadedDocument, setUploadedDocument] =
     useState<UploadedDocumentMetadata | null>(null);
 
@@ -84,6 +93,33 @@ export function DocumentPanel({
 
   useEffect(() => clearChunkingTimer, []);
 
+  useEffect(() => {
+    const stored = getDocumentSessionState();
+    if (!stored?.uploadedDocument) {
+      onDocumentReadyChange?.(false);
+      return;
+    }
+
+    setUploadedDocument(stored.uploadedDocument);
+    setProcessingFilename(stored.uploadedDocument.filename);
+    setStage("ready");
+    onDocumentReadyChange?.(true);
+  }, [onDocumentReadyChange]);
+
+  useEffect(() => {
+    if (uploadStartedAt === null) {
+      setElapsedSeconds(0);
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - uploadStartedAt) / 1000)));
+    }, 1000);
+
+    setElapsedSeconds(Math.max(0, Math.floor((Date.now() - uploadStartedAt) / 1000)));
+    return () => window.clearInterval(intervalId);
+  }, [uploadStartedAt]);
+
   const getStageLabel = (value: UploadStage) => {
     if (value === "uploading") return "Uploading...";
     if (value === "chunking") return "Chunking Document...";
@@ -95,6 +131,43 @@ export function DocumentPanel({
 
   const getIndexedChunks = (response: UploadApiResponse) =>
     response.chunks_generated ?? response.indexed_chunks ?? 0;
+
+  const isProcessing =
+    stage === "uploading" || stage === "chunking" || stage === "indexing";
+
+  const getStageStepIndex = (value: UploadStage) => {
+    if (value === "uploading") return 1;
+    if (value === "chunking") return 2;
+    if (value === "indexing") return 3;
+    if (value === "ready") return 3;
+    return 0;
+  };
+
+  const getStageDescription = (value: UploadStage) => {
+    if (value === "uploading") {
+      return "Sending your PDF to the backend.";
+    }
+    if (value === "chunking") {
+      return "Extracting text and splitting the document into chunks.";
+    }
+    if (value === "indexing") {
+      return "Saving chunks and preparing retrieval.";
+    }
+    if (value === "ready") {
+      return "Document is indexed and ready for chat.";
+    }
+    if (value === "error") {
+      return "Document processing stopped before completion.";
+    }
+    return "Upload a PDF to begin.";
+  };
+
+  const formatElapsed = (seconds: number) => {
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes}m ${remainingSeconds}s`;
+  };
 
   const sleep = (ms: number) =>
     new Promise<void>((resolve) => {
@@ -186,6 +259,9 @@ export function DocumentPanel({
 
     try {
       let payload: UploadApiResponse;
+      setProcessingFilename(file.name);
+      setUploadStartedAt(Date.now());
+      setCurrentUploadJobId(null);
       const asyncResponse = await apiFetch(BACKEND_ASYNC_UPLOAD_ENDPOINT, {
         method: "POST",
         body: formData,
@@ -193,6 +269,7 @@ export function DocumentPanel({
 
       if (asyncResponse.ok) {
         const accepted = (await asyncResponse.json()) as UploadJobAcceptedResponse;
+        setCurrentUploadJobId(accepted.job_id);
         payload = await pollUploadJob(accepted.job_id);
       } else if (asyncResponse.status === 404 || asyncResponse.status === 405) {
         // Backward compatibility if backend has not been redeployed yet.
@@ -207,17 +284,25 @@ export function DocumentPanel({
 
       clearChunkingTimer();
 
-      setUploadedDocument({
+      const nextUploadedDocument = {
         filename: payload.filename ?? file.name,
         totalPages: payload.total_pages ?? payload.page_count ?? null,
         indexedChunks: getIndexedChunks(payload),
-      });
+      };
+      setUploadedDocument(nextUploadedDocument);
+      setDocumentSessionState(nextUploadedDocument);
       setStage("ready");
+      setUploadStartedAt(null);
+      setCurrentUploadJobId(null);
       onDocumentReadyChange?.(true);
     } catch (error) {
       clearChunkingTimer();
       setStage("error");
+      setUploadStartedAt(null);
       setUploadedDocument(null);
+      setProcessingFilename(null);
+      setCurrentUploadJobId(null);
+      clearDocumentSessionState();
       onDocumentReadyChange?.(false);
       setErrorMessage(
         error instanceof Error ? error.message : "Unexpected upload error.",
@@ -306,27 +391,72 @@ export function DocumentPanel({
                 Supported format: PDF
               </p>
             </div>
-            <div className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2 text-sm">
-              <span
-                className={cn(
-                  "flex items-center gap-2",
-                  stage === "error" ? "text-destructive" : "text-foreground",
-                )}
-              >
-                {stage === "uploading" || stage === "chunking" ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <FileText className="size-4" />
-                )}
-                {getStageLabel(stage)}
-              </span>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => inputRef.current?.click()}
-              >
-                Select File
-              </Button>
+            <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <span
+                  className={cn(
+                    "flex items-center gap-2",
+                    stage === "error" ? "text-destructive" : "text-foreground",
+                  )}
+                >
+                  {isProcessing ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <FileText className="size-4" />
+                  )}
+                  {getStageLabel(stage)}
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => inputRef.current?.click()}
+                >
+                  Select File
+                </Button>
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {getStageDescription(stage)}
+              </p>
+              {isProcessing ? (
+                <div className="mt-3 space-y-2">
+                  <div className="grid grid-cols-3 gap-1" aria-hidden="true">
+                    {["Upload", "Chunk", "Index"].map((stepLabel, index) => {
+                      const stepNumber = index + 1;
+                      const currentStep = getStageStepIndex(stage);
+                      const completed = stepNumber < currentStep;
+                      const active = stepNumber === currentStep;
+                      return (
+                        <div key={stepLabel} className="space-y-1">
+                          <div
+                            className={cn(
+                              "h-1.5 rounded-full transition-colors",
+                              completed && "bg-primary",
+                              active && "bg-primary/70 animate-pulse",
+                              !completed && !active && "bg-border",
+                            )}
+                          />
+                          <p className="text-[10px] text-muted-foreground">
+                            {stepLabel}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    <span>Elapsed: {formatElapsed(elapsedSeconds)}</span>
+                    {processingFilename ? (
+                      <span className="truncate">
+                        File: <span className="font-medium">{processingFilename}</span>
+                      </span>
+                    ) : null}
+                    {currentUploadJobId ? (
+                      <span>
+                        Job: <span className="font-mono">{currentUploadJobId.slice(0, 8)}</span>
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
             </div>
             {errorMessage ? (
               <p className="text-xs text-destructive">{errorMessage}</p>

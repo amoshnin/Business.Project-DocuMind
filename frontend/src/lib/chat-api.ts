@@ -20,6 +20,16 @@ export function getSessionId(): string {
   return newSessionId;
 }
 
+export function resetSessionId(): string {
+  if (typeof window === "undefined") {
+    return "00000000-0000-0000-0000-000000000000";
+  }
+
+  const newSessionId = window.crypto.randomUUID();
+  window.sessionStorage.setItem(SESSION_STORAGE_KEY, newSessionId);
+  return newSessionId;
+}
+
 export async function submitQuery(query: string): Promise<Response> {
   const response = await apiFetch(CHAT_STREAM_ENDPOINT, {
     method: "POST",

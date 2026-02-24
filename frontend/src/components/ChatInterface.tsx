@@ -14,12 +14,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { getSessionId, submitQuery } from "@/lib/chat-api";
+import { getSessionId, resetSessionId, submitQuery } from "@/lib/chat-api";
 import {
   Citation,
   getCitationBadgeLabel,
   getCitationKey,
 } from "@/lib/citations";
+import { hasRetainedDocumentSession } from "@/lib/document-session";
 import { cn } from "@/lib/utils";
 
 type ChatMessage = {
@@ -70,7 +71,17 @@ export function ChatInterface({
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const historyKey = `${CHAT_HISTORY_STORAGE_PREFIX}${getSessionId()}`;
+    const sessionId = getSessionId();
+    const historyKey = `${CHAT_HISTORY_STORAGE_PREFIX}${sessionId}`;
+
+    if (!hasRetainedDocumentSession()) {
+      window.localStorage.removeItem(historyKey);
+      setMessages(INITIAL_MESSAGES);
+      resetSessionId();
+      setHistoryHydrated(true);
+      return;
+    }
+
     const rawHistory = window.localStorage.getItem(historyKey);
     if (rawHistory) {
       try {
