@@ -14,6 +14,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { apiFetch } from "@/lib/api-client";
+import { handleBackendRequestStart, useBackendStatus } from "@/lib/backend-status";
 import { getApiBaseUrl } from "@/lib/backend-url";
 import { Citation } from "@/lib/citations";
 import {
@@ -25,6 +26,8 @@ import { cn } from "@/lib/utils";
 
 type UploadStage =
   | "idle"
+  | "queued"
+  | "processing"
   | "uploading"
   | "chunking"
   | "indexing"
@@ -47,6 +50,12 @@ type UploadJobAcceptedResponse = {
 type UploadJobStatusResponse = UploadApiResponse & {
   job_id: string;
   status: "queued" | "processing" | "chunking" | "indexing" | "completed" | "failed";
+  pages_processed?: number;
+  last_processed_page?: number;
+  chunks_generated_so_far?: number;
+  chunking_started_at?: number;
+  indexing_started_at?: number;
+  completed_at?: number;
   detail?: string;
 };
 
@@ -71,6 +80,7 @@ export function DocumentPanel({
   activeCitation,
   onDocumentReadyChange,
 }: DocumentPanelProps) {
+  const { status: backendStatus } = useBackendStatus();
   const inputRef = useRef<HTMLInputElement>(null);
   const chunkingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -81,6 +91,8 @@ export function DocumentPanel({
   const [uploadStartedAt, setUploadStartedAt] = useState<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [currentUploadJobId, setCurrentUploadJobId] = useState<string | null>(null);
+  const [uploadJobProgress, setUploadJobProgress] =
+    useState<UploadJobStatusResponse | null>(null);
   const [uploadedDocument, setUploadedDocument] =
     useState<UploadedDocumentMetadata | null>(null);
 
@@ -121,6 +133,8 @@ export function DocumentPanel({
   }, [uploadStartedAt]);
 
   const getStageLabel = (value: UploadStage) => {
+    if (value === "queued") return "Queued on Server...";
+    if (value === "processing") return "Starting Processing...";
     if (value === "uploading") return "Uploading...";
     if (value === "chunking") return "Chunking Document...";
     if (value === "indexing") return "Indexing Chunks...";
@@ -133,9 +147,15 @@ export function DocumentPanel({
     response.chunks_generated ?? response.indexed_chunks ?? 0;
 
   const isProcessing =
-    stage === "uploading" || stage === "chunking" || stage === "indexing";
+    stage === "queued" ||
+    stage === "processing" ||
+    stage === "uploading" ||
+    stage === "chunking" ||
+    stage === "indexing";
+  const isBackendReady = backendStatus === "ready";
 
   const getStageStepIndex = (value: UploadStage) => {
+    if (value === "queued" || value === "processing") return 1;
     if (value === "uploading") return 1;
     if (value === "chunking") return 2;
     if (value === "indexing") return 3;
@@ -144,6 +164,18 @@ export function DocumentPanel({
   };
 
   const getStageDescription = (value: UploadStage) => {
+    if (!isBackendReady && !isProcessing) {
+      return backendStatus === "waking"
+        ? "Backend is starting up. Upload will be enabled automatically when ready."
+        : "Backend is unavailable. Please try again later.";
+    }
+
+    if (value === "queued") {
+      return "Waiting for the backend worker to start your upload job.";
+    }
+    if (value === "processing") {
+      return "Server accepted the file and is preparing the chunking pipeline.";
+    }
     if (value === "uploading") {
       return "Sending your PDF to the backend.";
     }
@@ -162,11 +194,81 @@ export function DocumentPanel({
     return "Upload a PDF to begin.";
   };
 
+  const canStartUpload = () => {
+    if (isProcessing) {
+      return false;
+    }
+
+    try {
+      return handleBackendRequestStart() === "ready";
+    } catch {
+      return false;
+    }
+  };
+
+  const openFilePickerIfAllowed = () => {
+    if (!canStartUpload()) {
+      return;
+    }
+
+    inputRef.current?.click();
+  };
+
   const formatElapsed = (seconds: number) => {
     if (seconds < 60) return `${seconds}s`;
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = seconds % 60;
     return `${minutes}m ${remainingSeconds}s`;
+  };
+
+  const formatPercent = (value: number) => `${Math.round(value)}%`;
+
+  const getChunkingProgress = () => {
+    if (!uploadJobProgress) return null;
+    const totalPages = uploadJobProgress.total_pages;
+    const pagesProcessed = uploadJobProgress.pages_processed;
+    if (
+      typeof totalPages !== "number" ||
+      totalPages <= 0 ||
+      typeof pagesProcessed !== "number"
+    ) {
+      return null;
+    }
+
+    const clampedProcessed = Math.max(0, Math.min(totalPages, pagesProcessed));
+    return {
+      totalPages,
+      pagesProcessed: clampedProcessed,
+      percent: (clampedProcessed / totalPages) * 100,
+      chunksGeneratedSoFar:
+        uploadJobProgress.chunks_generated_so_far ??
+        uploadJobProgress.chunks_generated ??
+        0,
+    };
+  };
+
+  const getChunkingEtaSeconds = () => {
+    if (stage !== "chunking" || !uploadJobProgress) return null;
+    const totalPages = uploadJobProgress.total_pages;
+    const pagesProcessed = uploadJobProgress.pages_processed;
+    const chunkingStartedAt = uploadJobProgress.chunking_started_at;
+    if (
+      typeof totalPages !== "number" ||
+      totalPages <= 0 ||
+      typeof pagesProcessed !== "number" ||
+      pagesProcessed <= 0 ||
+      pagesProcessed >= totalPages ||
+      typeof chunkingStartedAt !== "number"
+    ) {
+      return null;
+    }
+
+    const elapsed = Math.max(0, Date.now() / 1000 - chunkingStartedAt);
+    if (elapsed <= 0) return null;
+
+    const secondsPerPage = elapsed / pagesProcessed;
+    const remainingPages = totalPages - pagesProcessed;
+    return Math.max(0, Math.round(secondsPerPage * remainingPages));
   };
 
   const sleep = (ms: number) =>
@@ -194,11 +296,21 @@ export function DocumentPanel({
       }
 
       const statusPayload = (await response.json()) as UploadJobStatusResponse;
-      if (
-        statusPayload.status === "queued" ||
-        statusPayload.status === "processing" ||
-        statusPayload.status === "chunking"
-      ) {
+      setUploadJobProgress(statusPayload);
+
+      if (statusPayload.status === "queued") {
+        setStage("queued");
+        await sleep(UPLOAD_JOB_POLL_INTERVAL_MS);
+        continue;
+      }
+
+      if (statusPayload.status === "processing") {
+        setStage("processing");
+        await sleep(UPLOAD_JOB_POLL_INTERVAL_MS);
+        continue;
+      }
+
+      if (statusPayload.status === "chunking") {
         setStage("chunking");
         await sleep(UPLOAD_JOB_POLL_INTERVAL_MS);
         continue;
@@ -211,10 +323,12 @@ export function DocumentPanel({
       }
 
       if (statusPayload.status === "completed") {
+        setUploadJobProgress(statusPayload);
         return statusPayload;
       }
 
       if (statusPayload.status === "failed") {
+        setUploadJobProgress(statusPayload);
         throw new Error(statusPayload.detail ?? "Document processing failed.");
       }
 
@@ -248,13 +362,14 @@ export function DocumentPanel({
   async function uploadDocument(file: File) {
     clearChunkingTimer();
     setErrorMessage(null);
+    setUploadJobProgress(null);
     setStage("uploading");
 
     const formData = new FormData();
     formData.append("file", file);
 
     chunkingTimerRef.current = setTimeout(() => {
-      setStage((current) => (current === "uploading" ? "chunking" : current));
+      setStage((current) => (current === "uploading" ? "processing" : current));
     }, 700);
 
     try {
@@ -313,6 +428,10 @@ export function DocumentPanel({
   const onFileSelected = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+    if (!canStartUpload()) {
+      event.target.value = "";
+      return;
+    }
 
     if (file.type !== "application/pdf") {
       setStage("error");
@@ -329,6 +448,9 @@ export function DocumentPanel({
   const onDrop = async (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setIsDragActive(false);
+    if (!canStartUpload()) {
+      return;
+    }
 
     const file = event.dataTransfer.files?.[0];
     if (!file) return;
@@ -364,23 +486,30 @@ export function DocumentPanel({
             />
             <div
               role="button"
-              tabIndex={0}
+              tabIndex={isProcessing ? -1 : 0}
+              aria-disabled={isProcessing || !isBackendReady}
               onKeyDown={(event) => {
                 if (event.key === "Enter" || event.key === " ") {
                   event.preventDefault();
-                  inputRef.current?.click();
+                  openFilePickerIfAllowed();
                 }
               }}
-              onClick={() => inputRef.current?.click()}
+              onClick={openFilePickerIfAllowed}
               onDragOver={(event) => {
                 event.preventDefault();
-                setIsDragActive(true);
+                if (!isProcessing && isBackendReady) {
+                  setIsDragActive(true);
+                }
               }}
               onDragLeave={() => setIsDragActive(false)}
               onDrop={onDrop}
               className={cn(
                 "rounded-lg border border-dashed p-6 text-center transition-colors",
-                isDragActive ? "border-primary bg-primary/5" : "border-border",
+                !isProcessing && !isBackendReady && "cursor-not-allowed opacity-70",
+                isProcessing && "cursor-not-allowed opacity-70",
+                isDragActive && isBackendReady && !isProcessing
+                  ? "border-primary bg-primary/5"
+                  : "border-border",
               )}
             >
               <UploadCloud className="mx-auto mb-2 size-8 text-muted-foreground" />
@@ -409,7 +538,8 @@ export function DocumentPanel({
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => inputRef.current?.click()}
+                  disabled={isProcessing}
+                  onClick={openFilePickerIfAllowed}
                 >
                   Select File
                 </Button>
@@ -444,6 +574,11 @@ export function DocumentPanel({
                   </div>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                     <span>Elapsed: {formatElapsed(elapsedSeconds)}</span>
+                    {stage === "chunking" && getChunkingEtaSeconds() !== null ? (
+                      <span>
+                        ETA: {formatElapsed(getChunkingEtaSeconds() ?? 0)}
+                      </span>
+                    ) : null}
                     {processingFilename ? (
                       <span className="truncate">
                         File: <span className="font-medium">{processingFilename}</span>
@@ -455,6 +590,40 @@ export function DocumentPanel({
                       </span>
                     ) : null}
                   </div>
+                  {(() => {
+                    const chunkingProgress = getChunkingProgress();
+                    if (!chunkingProgress) return null;
+                    return (
+                      <div className="space-y-1 rounded border bg-background/60 px-2 py-2 text-xs">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-muted-foreground">
+                            Pages:{" "}
+                            <span className="font-medium text-foreground">
+                              {chunkingProgress.pagesProcessed}/{chunkingProgress.totalPages}
+                            </span>
+                          </span>
+                          <span className="text-muted-foreground">
+                            {formatPercent(chunkingProgress.percent)}
+                          </span>
+                        </div>
+                        <div
+                          className="h-1.5 rounded-full bg-border"
+                          aria-hidden="true"
+                        >
+                          <div
+                            className="h-full rounded-full bg-primary transition-[width]"
+                            style={{ width: `${chunkingProgress.percent}%` }}
+                          />
+                        </div>
+                        <div className="text-muted-foreground">
+                          Chunks generated so far:{" "}
+                          <span className="font-medium text-foreground">
+                            {chunkingProgress.chunksGeneratedSoFar}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               ) : null}
             </div>

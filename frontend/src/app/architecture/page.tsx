@@ -464,7 +464,7 @@ export default function ArchitecturePage() {
               </CardDescription>
               <div className="space-y-2">
                 <Button asChild variant="default" size="sm" className="w-full">
-                  <Link href="/">
+                  <Link href="/demo">
                     <ArrowLeft className="size-4" />
                     Return to Dashboard
                   </Link>
@@ -511,7 +511,7 @@ export default function ArchitecturePage() {
                   variant="default"
                   className="w-full justify-center"
                 >
-                  <Link href="/">
+                  <Link href="/demo">
                     <ArrowLeft className="size-4" />
                     Return to Dashboard
                   </Link>

@@ -5,7 +5,7 @@ import json
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
-from functools import lru_cache
+from functools import lru_cache, partial
 from importlib import import_module
 from uuid import uuid4
 
@@ -98,8 +98,14 @@ class UploadJobStatusResponse(BaseModel):
     status: str
     filename: str | None = None
     total_pages: int | None = None
+    pages_processed: int | None = None
+    last_processed_page: int | None = None
     chunks_generated: int | None = None
+    chunks_generated_so_far: int | None = None
     indexed_chunks: int | None = None
+    chunking_started_at: float | None = None
+    indexing_started_at: float | None = None
+    completed_at: float | None = None
     detail: str | None = None
 
 
@@ -373,14 +379,32 @@ async def _run_document_upload_pipeline(
     from services.document_processor import process_pdf
     from services.retriever import add_documents_to_store, maybe_add_documents_to_bm25
 
+    progress_callback = None
     if job_id is not None:
-        _upsert_upload_job(job_id, status="chunking", filename=filename)
+        chunking_started_at = time.time()
+        _upsert_upload_job(
+            job_id,
+            status="chunking",
+            filename=filename,
+            chunking_started_at=chunking_started_at,
+            pages_processed=0,
+            chunks_generated_so_far=0,
+        )
+        loop = asyncio.get_running_loop()
+
+        def on_chunk_progress(progress_updates: dict[str, object]) -> None:
+            loop.call_soon_threadsafe(
+                partial(_upsert_upload_job, job_id, **progress_updates)
+            )
+
+        progress_callback = on_chunk_progress
 
     chunks, total_pages = await process_pdf(
         file_bytes=file_bytes,
         filename=filename,
         chunk_size=runtime_config.chunk_size,
         chunk_overlap=runtime_config.chunk_overlap,
+        progress_callback=progress_callback,
     )
 
     if job_id is not None:
@@ -389,7 +413,11 @@ async def _run_document_upload_pipeline(
             status="indexing",
             filename=filename,
             total_pages=total_pages,
+            pages_processed=total_pages,
+            last_processed_page=total_pages if total_pages > 0 else None,
             chunks_generated=len(chunks),
+            chunks_generated_so_far=len(chunks),
+            indexing_started_at=time.time(),
         )
 
     embeddings = get_embeddings_model()
@@ -407,7 +435,7 @@ async def _run_document_upload_pipeline(
         "indexed_chunks": len(chunks),
     }
     if job_id is not None:
-        _upsert_upload_job(job_id, status="completed", **result)
+        _upsert_upload_job(job_id, status="completed", completed_at=time.time(), **result)
     return result
 
 
