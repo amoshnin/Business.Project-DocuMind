@@ -18,7 +18,13 @@ import { getApiBaseUrl } from "@/lib/backend-url";
 import { Citation } from "@/lib/citations";
 import { cn } from "@/lib/utils";
 
-type UploadStage = "idle" | "uploading" | "chunking" | "ready" | "error";
+type UploadStage =
+  | "idle"
+  | "uploading"
+  | "chunking"
+  | "indexing"
+  | "ready"
+  | "error";
 
 type UploadApiResponse = {
   chunks_generated?: number;
@@ -26,6 +32,17 @@ type UploadApiResponse = {
   total_pages?: number;
   page_count?: number;
   filename?: string;
+};
+
+type UploadJobAcceptedResponse = {
+  job_id: string;
+  status: string;
+};
+
+type UploadJobStatusResponse = UploadApiResponse & {
+  job_id: string;
+  status: "queued" | "processing" | "chunking" | "indexing" | "completed" | "failed";
+  detail?: string;
 };
 
 type UploadedDocumentMetadata = {
@@ -36,6 +53,9 @@ type UploadedDocumentMetadata = {
 
 const API_BASE_URL = getApiBaseUrl();
 const BACKEND_UPLOAD_ENDPOINT = `${API_BASE_URL}/api/v1/documents/upload`;
+const BACKEND_ASYNC_UPLOAD_ENDPOINT = `${API_BASE_URL}/api/v1/documents/upload/async`;
+const UPLOAD_JOB_TIMEOUT_MS = 4 * 60 * 1000;
+const UPLOAD_JOB_POLL_INTERVAL_MS = 1200;
 
 type DocumentPanelProps = {
   activeCitation: Citation | null;
@@ -67,6 +87,7 @@ export function DocumentPanel({
   const getStageLabel = (value: UploadStage) => {
     if (value === "uploading") return "Uploading...";
     if (value === "chunking") return "Chunking Document...";
+    if (value === "indexing") return "Indexing Chunks...";
     if (value === "ready") return "Ready";
     if (value === "error") return "Upload failed";
     return "No document uploaded";
@@ -74,6 +95,82 @@ export function DocumentPanel({
 
   const getIndexedChunks = (response: UploadApiResponse) =>
     response.chunks_generated ?? response.indexed_chunks ?? 0;
+
+  const sleep = (ms: number) =>
+    new Promise<void>((resolve) => {
+      window.setTimeout(resolve, ms);
+    });
+
+  async function pollUploadJob(jobId: string): Promise<UploadApiResponse> {
+    const deadline = Date.now() + UPLOAD_JOB_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      const response = await apiFetch(
+        `${API_BASE_URL}/api/v1/documents/jobs/${encodeURIComponent(jobId)}`,
+        {
+          method: "GET",
+        },
+      );
+
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as
+          | { detail?: string }
+          | null;
+        throw new Error(
+          body?.detail ?? `Upload status failed with ${response.status}.`,
+        );
+      }
+
+      const statusPayload = (await response.json()) as UploadJobStatusResponse;
+      if (
+        statusPayload.status === "queued" ||
+        statusPayload.status === "processing" ||
+        statusPayload.status === "chunking"
+      ) {
+        setStage("chunking");
+        await sleep(UPLOAD_JOB_POLL_INTERVAL_MS);
+        continue;
+      }
+
+      if (statusPayload.status === "indexing") {
+        setStage("indexing");
+        await sleep(UPLOAD_JOB_POLL_INTERVAL_MS);
+        continue;
+      }
+
+      if (statusPayload.status === "completed") {
+        return statusPayload;
+      }
+
+      if (statusPayload.status === "failed") {
+        throw new Error(statusPayload.detail ?? "Document processing failed.");
+      }
+
+      await sleep(UPLOAD_JOB_POLL_INTERVAL_MS);
+    }
+
+    throw new Error(
+      "Upload processing timed out on the server. Try a smaller PDF or retry.",
+    );
+  }
+
+  async function uploadDocumentSyncFallback(
+    formData: FormData,
+  ): Promise<UploadApiResponse> {
+    const response = await apiFetch(BACKEND_UPLOAD_ENDPOINT, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const fallbackError = `Upload failed with status ${response.status}.`;
+      const body = (await response.json().catch(() => null)) as
+        | { detail?: string }
+        | null;
+      throw new Error(body?.detail ?? fallbackError);
+    }
+
+    return (await response.json()) as UploadApiResponse;
+  }
 
   async function uploadDocument(file: File) {
     clearChunkingTimer();
@@ -88,20 +185,26 @@ export function DocumentPanel({
     }, 700);
 
     try {
-      const response = await apiFetch(BACKEND_UPLOAD_ENDPOINT, {
+      let payload: UploadApiResponse;
+      const asyncResponse = await apiFetch(BACKEND_ASYNC_UPLOAD_ENDPOINT, {
         method: "POST",
         body: formData,
       });
 
-      if (!response.ok) {
-        const fallbackError = `Upload failed with status ${response.status}.`;
-        const body = (await response.json().catch(() => null)) as
+      if (asyncResponse.ok) {
+        const accepted = (await asyncResponse.json()) as UploadJobAcceptedResponse;
+        payload = await pollUploadJob(accepted.job_id);
+      } else if (asyncResponse.status === 404 || asyncResponse.status === 405) {
+        // Backward compatibility if backend has not been redeployed yet.
+        payload = await uploadDocumentSyncFallback(formData);
+      } else {
+        const fallbackError = `Upload failed with status ${asyncResponse.status}.`;
+        const body = (await asyncResponse.json().catch(() => null)) as
           | { detail?: string }
           | null;
         throw new Error(body?.detail ?? fallbackError);
       }
 
-      const payload = (await response.json()) as UploadApiResponse;
       clearChunkingTimer();
 
       setUploadedDocument({

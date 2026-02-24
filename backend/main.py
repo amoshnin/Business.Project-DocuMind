@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from functools import lru_cache
 from importlib import import_module
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, File, HTTPException, Header, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -70,6 +72,7 @@ MIN_TEMPERATURE = 0.0
 MAX_TEMPERATURE = 1.0
 MAX_CHAT_HISTORY_MESSAGES_PER_SESSION = 20
 MAX_IN_MEMORY_SESSIONS = 200
+MAX_UPLOAD_JOBS_IN_MEMORY = 200
 DEFAULT_CORS_ALLOW_ORIGIN_REGEX = (
     r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
     r"|https://business-project-docu-mind-[a-z0-9-]+\.vercel\.app"
@@ -83,6 +86,21 @@ class RuntimeConfig(BaseModel):
     bm25_k: int = DEFAULT_BM25_K
     dense_weight: float = DEFAULT_DENSE_WEIGHT
     temperature: float = DEFAULT_TEMPERATURE
+
+
+class UploadJobAcceptedResponse(BaseModel):
+    job_id: str
+    status: str
+
+
+class UploadJobStatusResponse(BaseModel):
+    job_id: str
+    status: str
+    filename: str | None = None
+    total_pages: int | None = None
+    chunks_generated: int | None = None
+    indexed_chunks: int | None = None
+    detail: str | None = None
 
 
 def _parse_csv_list(raw_value: str | None) -> list[str]:
@@ -303,6 +321,32 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="DocuMind API", lifespan=lifespan)
 session_store: dict[str, list[BaseMessage]] = {}
+upload_job_store: dict[str, dict[str, object]] = {}
+upload_job_tasks: dict[str, asyncio.Task[None]] = {}
+
+
+def _trim_upload_jobs() -> None:
+    while len(upload_job_store) > MAX_UPLOAD_JOBS_IN_MEMORY:
+        oldest_job_id = next(iter(upload_job_store))
+        task = upload_job_tasks.get(oldest_job_id)
+        if task is not None and not task.done():
+            break
+        upload_job_store.pop(oldest_job_id, None)
+        upload_job_tasks.pop(oldest_job_id, None)
+
+
+def _upsert_upload_job(job_id: str, **updates: object) -> None:
+    payload = upload_job_store.setdefault(job_id, {"job_id": job_id})
+    payload.update(updates)
+    payload["updated_at"] = time.time()
+    _trim_upload_jobs()
+
+
+def _coerce_upload_job_response(job_id: str) -> UploadJobStatusResponse:
+    payload = upload_job_store.get(job_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Upload job not found.")
+    return UploadJobStatusResponse.model_validate(payload)
 
 app.add_middleware(
     CORSMiddleware,
@@ -323,6 +367,113 @@ async def health() -> dict[str, str | bool]:
     }
 
 
+async def _run_document_upload_pipeline(
+    *,
+    file_bytes: bytes,
+    filename: str,
+    runtime_config: RuntimeConfig,
+    job_id: str | None = None,
+) -> dict[str, int | str]:
+    from services.document_processor import process_pdf
+    from services.retriever import add_documents_to_store, maybe_add_documents_to_bm25
+
+    if job_id is not None:
+        _upsert_upload_job(job_id, status="chunking", filename=filename)
+
+    chunks, total_pages = await process_pdf(
+        file_bytes=file_bytes,
+        filename=filename,
+        chunk_size=runtime_config.chunk_size,
+        chunk_overlap=runtime_config.chunk_overlap,
+    )
+
+    if job_id is not None:
+        _upsert_upload_job(
+            job_id,
+            status="indexing",
+            filename=filename,
+            total_pages=total_pages,
+            chunks_generated=len(chunks),
+        )
+
+    embeddings = get_embeddings_model()
+    try:
+        if chunks:
+            await add_documents_to_store(chunks, embeddings)
+            maybe_add_documents_to_bm25(chunks)
+    except OpenAIAuthenticationError as exc:
+        raise HTTPException(status_code=401, detail=INVALID_KEY_DETAIL) from exc
+
+    result: dict[str, int | str] = {
+        "filename": filename,
+        "total_pages": total_pages,
+        "chunks_generated": len(chunks),
+        "indexed_chunks": len(chunks),
+    }
+    if job_id is not None:
+        _upsert_upload_job(job_id, status="completed", **result)
+    return result
+
+
+async def _run_upload_job(
+    *,
+    job_id: str,
+    file_bytes: bytes,
+    filename: str,
+    runtime_config: RuntimeConfig,
+) -> None:
+    try:
+        _upsert_upload_job(job_id, status="processing", filename=filename)
+        await _run_document_upload_pipeline(
+            file_bytes=file_bytes,
+            filename=filename,
+            runtime_config=runtime_config,
+            job_id=job_id,
+        )
+    except HTTPException as exc:
+        _upsert_upload_job(
+            job_id,
+            status="failed",
+            filename=filename,
+            detail=str(exc.detail),
+        )
+    except Exception as exc:
+        _upsert_upload_job(
+            job_id,
+            status="failed",
+            filename=filename,
+            detail=str(exc),
+        )
+
+
+def _start_upload_job(
+    *,
+    job_id: str,
+    file_bytes: bytes,
+    filename: str,
+    runtime_config: RuntimeConfig,
+) -> None:
+    task = asyncio.create_task(
+        _run_upload_job(
+            job_id=job_id,
+            file_bytes=file_bytes,
+            filename=filename,
+            runtime_config=runtime_config,
+        )
+    )
+    upload_job_tasks[job_id] = task
+
+    def _cleanup_task(done_task: asyncio.Task[None]) -> None:
+        upload_job_tasks.pop(job_id, None)
+        try:
+            done_task.result()
+        except Exception:
+            # Error is already captured in the job store.
+            return
+
+    task.add_done_callback(_cleanup_task)
+
+
 @app.post("/upload")
 @app.post("/api/v1/documents/upload")
 async def upload_document(
@@ -331,8 +482,6 @@ async def upload_document(
     runtime_config: RuntimeConfig = Depends(get_runtime_config),
 ) -> dict[str, int | str]:
     _provider, _openai_key = provider_ctx
-    from services.document_processor import process_pdf
-    from services.retriever import add_documents_to_store, maybe_add_documents_to_bm25
 
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required.")
@@ -355,26 +504,57 @@ async def upload_document(
             detail=f"PDF is too large. Maximum upload size is {max_upload_mb} MB.",
         )
 
-    chunks, total_pages = await process_pdf(
+    return await _run_document_upload_pipeline(
         file_bytes=file_bytes,
         filename=file.filename,
-        chunk_size=runtime_config.chunk_size,
-        chunk_overlap=runtime_config.chunk_overlap,
+        runtime_config=runtime_config,
     )
-    embeddings = get_embeddings_model()
-    try:
-        if chunks:
-            await add_documents_to_store(chunks, embeddings)
-            maybe_add_documents_to_bm25(chunks)
-    except OpenAIAuthenticationError as exc:
-        raise HTTPException(status_code=401, detail=INVALID_KEY_DETAIL) from exc
 
-    return {
-        "filename": file.filename,
-        "total_pages": total_pages,
-        "chunks_generated": len(chunks),
-        "indexed_chunks": len(chunks),
-    }
+
+@app.post("/api/v1/documents/upload/async", response_model=UploadJobAcceptedResponse)
+async def upload_document_async(
+    file: UploadFile = File(...),
+    provider_ctx: tuple[str, str | None] = Depends(get_provider_context),
+    runtime_config: RuntimeConfig = Depends(get_runtime_config),
+) -> UploadJobAcceptedResponse:
+    _provider, _openai_key = provider_ctx
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename is required.")
+
+    max_upload_mb = max(1, int(settings.documind_max_upload_mb))
+    max_upload_bytes = max_upload_mb * 1024 * 1024
+    file_size = getattr(file, "size", None)
+    if isinstance(file_size, int) and file_size > max_upload_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"PDF is too large. Maximum upload size is {max_upload_mb} MB.",
+        )
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+    if len(file_bytes) > max_upload_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"PDF is too large. Maximum upload size is {max_upload_mb} MB.",
+        )
+
+    job_id = str(uuid4())
+    _upsert_upload_job(job_id, status="queued", filename=file.filename)
+    _start_upload_job(
+        job_id=job_id,
+        file_bytes=file_bytes,
+        filename=file.filename,
+        runtime_config=runtime_config,
+    )
+    return UploadJobAcceptedResponse(job_id=job_id, status="queued")
+
+
+@app.get("/api/v1/documents/upload/jobs/{job_id}", response_model=UploadJobStatusResponse)
+@app.get("/api/v1/documents/jobs/{job_id}", response_model=UploadJobStatusResponse)
+async def get_upload_job_status(job_id: str) -> UploadJobStatusResponse:
+    return _coerce_upload_job_response(job_id)
 
 
 @app.post("/query", response_model=ChatResponse)
