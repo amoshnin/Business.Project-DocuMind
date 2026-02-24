@@ -14,6 +14,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { apiFetch } from "@/lib/api-client";
+import { getApiBaseUrl } from "@/lib/backend-url";
 import { Citation } from "@/lib/citations";
 import { cn } from "@/lib/utils";
 
@@ -33,8 +34,7 @@ type UploadedDocumentMetadata = {
   indexedChunks: number;
 };
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE_URL = getApiBaseUrl();
 const BACKEND_UPLOAD_ENDPOINT = `${API_BASE_URL}/api/v1/documents/upload`;
 
 type DocumentPanelProps = {

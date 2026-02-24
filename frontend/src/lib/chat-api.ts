@@ -1,7 +1,7 @@
 import { apiFetch } from "@/lib/api-client";
+import { getApiBaseUrl } from "@/lib/backend-url";
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE_URL = getApiBaseUrl();
 const CHAT_STREAM_ENDPOINT = `${API_BASE_URL}/api/v1/chat/stream`;
 const SESSION_STORAGE_KEY = "documind_session_id";
 

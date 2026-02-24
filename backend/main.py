@@ -10,6 +10,9 @@ from importlib import import_module
 from fastapi import Depends, FastAPI, File, HTTPException, Header, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from langchain_core.embeddings import Embeddings
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import BaseMessage
 from pydantic import BaseModel
 
 try:
@@ -65,6 +68,12 @@ MIN_DENSE_WEIGHT = 0.2
 MAX_DENSE_WEIGHT = 0.8
 MIN_TEMPERATURE = 0.0
 MAX_TEMPERATURE = 1.0
+MAX_CHAT_HISTORY_MESSAGES_PER_SESSION = 20
+MAX_IN_MEMORY_SESSIONS = 200
+DEFAULT_CORS_ALLOW_ORIGIN_REGEX = (
+    r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
+    r"|https://business-project-docu-mind-[a-z0-9-]+\.vercel\.app"
+)
 
 
 class RuntimeConfig(BaseModel):
@@ -74,6 +83,34 @@ class RuntimeConfig(BaseModel):
     bm25_k: int = DEFAULT_BM25_K
     dense_weight: float = DEFAULT_DENSE_WEIGHT
     temperature: float = DEFAULT_TEMPERATURE
+
+
+def _parse_csv_list(raw_value: str | None) -> list[str]:
+    if not raw_value:
+        return []
+    return [item.strip().rstrip("/") for item in raw_value.split(",") if item.strip()]
+
+
+def build_cors_allow_origins() -> list[str]:
+    default_origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://business-project-docu-mind.vercel.app",
+    ]
+    extra_origins = _parse_csv_list(settings.documind_cors_allow_origins)
+    merged: list[str] = []
+    for origin in [*default_origins, *extra_origins]:
+        normalized = origin.rstrip("/")
+        if normalized and normalized not in merged:
+            merged.append(normalized)
+    return merged
+
+
+def build_cors_allow_origin_regex() -> str | None:
+    configured = (settings.documind_cors_allow_origin_regex or "").strip()
+    if configured:
+        return configured
+    return DEFAULT_CORS_ALLOW_ORIGIN_REGEX
 
 
 def clamp_int(value: int, minimum: int, maximum: int) -> int:
@@ -203,7 +240,10 @@ def map_provider_error(exc: Exception) -> HTTPException | None:
 
 
 @lru_cache
-def get_embeddings_model() -> Embeddings:
+def get_embeddings_model() -> Embeddings | None:
+    if not settings.documind_dense_enabled:
+        return None
+
     HuggingFaceEmbeddings: type[Embeddings] | None = None
     try:
         HuggingFaceEmbeddings = getattr(
@@ -224,7 +264,16 @@ def get_embeddings_model() -> Embeddings:
             detail="HuggingFace embeddings dependency is not installed.",
         )
 
-    return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    try:
+        return HuggingFaceEmbeddings(model_name=settings.documind_embeddings_model_name)
+    except MemoryError as exc:  # pragma: no cover
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Server ran out of memory while loading dense embeddings. "
+                "Set DOCUMIND_DENSE_ENABLED=false for low-memory deployment."
+            ),
+        ) from exc
 
 
 async def _warm_retriever_cache() -> None:
@@ -257,15 +306,8 @@ session_store: dict[str, list[BaseMessage]] = {}
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "https://business-project-docu-mind.vercel.app",
-    ],
-    allow_origin_regex=(
-        r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
-        r"|https://business-project-docu-mind-[a-z0-9-]+\.vercel\.app"
-    ),
+    allow_origins=build_cors_allow_origins(),
+    allow_origin_regex=build_cors_allow_origin_regex(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -273,8 +315,12 @@ app.add_middleware(
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health() -> dict[str, str | bool]:
+    return {
+        "status": "ok",
+        "dense_retrieval_enabled": settings.documind_dense_enabled,
+        "bm25_enabled": settings.documind_bm25_enabled,
+    }
 
 
 @app.post("/upload")
@@ -291,9 +337,23 @@ async def upload_document(
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required.")
 
+    max_upload_mb = max(1, int(settings.documind_max_upload_mb))
+    max_upload_bytes = max_upload_mb * 1024 * 1024
+    file_size = getattr(file, "size", None)
+    if isinstance(file_size, int) and file_size > max_upload_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"PDF is too large. Maximum upload size is {max_upload_mb} MB.",
+        )
+
     file_bytes = await file.read()
     if not file_bytes:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+    if len(file_bytes) > max_upload_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"PDF is too large. Maximum upload size is {max_upload_mb} MB.",
+        )
 
     chunks, total_pages = await process_pdf(
         file_bytes=file_bytes,
@@ -455,6 +515,13 @@ async def chat_stream(
 
             history.append(HumanMessage(content=request.query))
             history.append(AIMessage(content=final_answer))
+            if len(history) > MAX_CHAT_HISTORY_MESSAGES_PER_SESSION:
+                del history[:-MAX_CHAT_HISTORY_MESSAGES_PER_SESSION]
+            while len(session_store) > MAX_IN_MEMORY_SESSIONS:
+                oldest_session_id = next(iter(session_store))
+                if oldest_session_id == session_id:
+                    break
+                session_store.pop(oldest_session_id, None)
             yield "data: [DONE]\n\n"
         except Exception as exc:
             mapped_error = map_provider_error(exc)

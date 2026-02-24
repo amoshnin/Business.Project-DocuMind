@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: documind-fastapi-backend
+    env: python
+    plan: free
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: llama-3.1-8b-instant
+      - key: CHROMA_PERSIST_DIR
+        value: /tmp/documind/chroma
+      - key: DOCUMIND_DENSE_ENABLED
+        value: "false"
+      - key: DOCUMIND_BM25_ENABLED
+        value: "true"
+      - key: DOCUMIND_BM25_MAX_DOCS
+        value: "2000"
+      - key: DOCUMIND_WARM_RETRIEVER_ON_STARTUP
+        value: "false"
+      - key: DOCUMIND_MAX_UPLOAD_MB
+        value: "15"
+      - key: DOCUMIND_CORS_ALLOW_ORIGINS
+        value: https://business-project-docu-mind.vercel.app
+      - key: DOCUMIND_CORS_ALLOW_ORIGIN_REGEX
+        value: https://business-project-docu-mind-[a-z0-9-]+\.vercel\.app

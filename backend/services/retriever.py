@@ -1,4 +1,6 @@
 import asyncio
+import json
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -6,8 +8,8 @@ try:
     from langchain_core.retrievers import BaseRetriever
 except Exception:  # pragma: no cover
     BaseRetriever = object  # type: ignore[assignment]
-from langchain_core.embeddings import Embeddings
 from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
 
 from config import get_settings
 
@@ -17,6 +19,88 @@ _chroma_class: type | None = None
 _ensemble_retriever_class: type | None = None
 _bm25_retriever_class: type | None = None
 _store_has_docs: bool | None = None
+
+
+def _dense_retrieval_enabled() -> bool:
+    return bool(_settings.documind_dense_enabled)
+
+
+def _sparse_store_path() -> Path:
+    return Path(_settings.chroma_persist_dir) / "documind_chunks.jsonl"
+
+
+def _ensure_persist_directory() -> None:
+    Path(_settings.chroma_persist_dir).mkdir(parents=True, exist_ok=True)
+
+
+def _serialize_document(doc: Document) -> dict[str, object]:
+    metadata = doc.metadata if isinstance(doc.metadata, dict) else {}
+    return {
+        "page_content": doc.page_content,
+        "metadata": metadata,
+    }
+
+
+def _append_documents_to_sparse_store(chunks: list[Document]) -> None:
+    if not chunks:
+        return
+
+    _ensure_persist_directory()
+    store_path = _sparse_store_path()
+    with store_path.open("a", encoding="utf-8") as handle:
+        for chunk in chunks:
+            handle.write(json.dumps(_serialize_document(chunk), ensure_ascii=True))
+            handle.write("\n")
+
+
+def _extract_documents_from_sparse_store(
+    max_documents: int | None = None,
+) -> list[Document]:
+    store_path = _sparse_store_path()
+    if not store_path.exists():
+        return []
+
+    limit = None if max_documents is None else max(0, int(max_documents))
+    documents: list[Document] = []
+    try:
+        with store_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if limit is not None and len(documents) >= limit:
+                    break
+                raw = line.strip()
+                if not raw:
+                    continue
+                try:
+                    payload = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                page_content = payload.get("page_content")
+                metadata = payload.get("metadata")
+                if not isinstance(page_content, str) or not page_content.strip():
+                    continue
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                documents.append(
+                    Document(page_content=page_content, metadata=dict(metadata))
+                )
+    except OSError:
+        return []
+
+    return documents
+
+
+def _sparse_store_has_documents() -> bool:
+    store_path = _sparse_store_path()
+    if not store_path.exists():
+        return False
+    try:
+        with store_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if line.strip():
+                    return True
+    except OSError:
+        return False
+    return False
 
 
 def _get_chroma_class() -> type:
@@ -82,6 +166,7 @@ def _new_vector_store(embeddings: Embeddings | None = None) -> Any:
     chroma_class = _get_chroma_class()
     return chroma_class(**kwargs)
 
+
 def _coerce_positive_int(value: int | None, default: int) -> int:
     if value is None:
         return default
@@ -90,12 +175,7 @@ def _coerce_positive_int(value: int | None, default: int) -> int:
     return value
 
 
-def _detect_store_has_documents() -> bool:
-    """Best-effort check to preserve old behavior: error before any upload.
-
-    Uses a small get() to avoid loading the whole corpus into memory.
-    """
-    global _store_has_docs
+def _detect_vector_store_has_documents() -> bool:
     vector_store = _new_vector_store()
     stored_data: Any
     try:
@@ -104,49 +184,63 @@ def _detect_store_has_documents() -> bool:
         try:
             stored_data = vector_store.get(include=["documents"])
         except Exception:
-            _store_has_docs = False
             return False
     except Exception:
-        _store_has_docs = False
         return False
 
     if not isinstance(stored_data, dict):
-        _store_has_docs = False
         return False
 
     documents = stored_data.get("documents") or []
-    has_docs = any(isinstance(item, str) and item.strip() for item in documents)
+    return any(isinstance(item, str) and item.strip() for item in documents)
+
+
+def _detect_store_has_documents() -> bool:
+    """Best-effort check to preserve old behavior: error before any upload."""
+    global _store_has_docs
+
+    if _sparse_store_has_documents():
+        _store_has_docs = True
+        return True
+
+    if not _dense_retrieval_enabled():
+        _store_has_docs = False
+        return False
+
+    has_docs = _detect_vector_store_has_documents()
     _store_has_docs = has_docs
     return has_docs
 
 
-def _add_documents(chunks: list[Document], embeddings: Embeddings) -> None:
+def _add_documents(chunks: list[Document], embeddings: Embeddings | None) -> None:
     if not chunks:
         return
-
-    vector_store = _new_vector_store(embeddings)
-    ids: list[str] = []
 
     for chunk in chunks:
         chunk_id = chunk.metadata.get("chunk_id")
         if not chunk_id:
             chunk_id = str(uuid4())
             chunk.metadata["chunk_id"] = chunk_id
-        ids.append(chunk_id)
 
-    vector_store.add_documents(documents=chunks, ids=ids)
+    _append_documents_to_sparse_store(chunks)
+
+    if _dense_retrieval_enabled() and embeddings is not None:
+        vector_store = _new_vector_store(embeddings)
+        ids = [str(chunk.metadata["chunk_id"]) for chunk in chunks]
+        vector_store.add_documents(documents=chunks, ids=ids)
+        persist_fn = getattr(vector_store, "persist", None)
+        if callable(persist_fn):
+            persist_fn()
+
     global _store_has_docs
     _store_has_docs = True
 
-    persist_fn = getattr(vector_store, "persist", None)
-    if callable(persist_fn):
-        persist_fn()
-
 
 async def add_documents_to_store(
-    chunks: list[Document], embeddings: Embeddings
+    chunks: list[Document], embeddings: Embeddings | None
 ) -> None:
     await asyncio.to_thread(_add_documents, chunks, embeddings)
+
 
 def maybe_add_documents_to_bm25(chunks: list[Document]) -> None:
     if not _settings.documind_bm25_enabled:
@@ -161,24 +255,37 @@ def maybe_add_documents_to_bm25(chunks: list[Document]) -> None:
         del _bm25_documents[: len(_bm25_documents) - max_docs]
 
 
+def _build_bm25_retriever(bm25_k: int) -> BaseRetriever:
+    BM25Retriever = _get_bm25_retriever_class()
+    bm25_retriever = BM25Retriever.from_documents(_bm25_documents)
+    bm25_retriever.k = bm25_k
+    return bm25_retriever
+
+
 def _build_hybrid_retriever(
-    embeddings: Embeddings,
+    embeddings: Embeddings | None,
     dense_k: int,
     bm25_k: int,
     dense_weight: float,
 ) -> BaseRetriever:
-    dense_retriever = _new_vector_store(embeddings).as_retriever(
-        search_kwargs={"k": dense_k}
-    )
+    dense_retriever: BaseRetriever | None = None
+    if _dense_retrieval_enabled() and embeddings is not None:
+        dense_retriever = _new_vector_store(embeddings).as_retriever(
+            search_kwargs={"k": dense_k}
+        )
 
-    if not _settings.documind_bm25_enabled or not _bm25_documents:
+    use_bm25 = bool(_settings.documind_bm25_enabled and _bm25_documents)
+    if use_bm25 and dense_retriever is None:
+        return _build_bm25_retriever(bm25_k)
+
+    if dense_retriever is not None and not use_bm25:
         return dense_retriever
 
-    BM25Retriever = _get_bm25_retriever_class()
-    EnsembleRetriever = _get_ensemble_retriever_class()
-    bm25_retriever = BM25Retriever.from_documents(_bm25_documents)
-    bm25_retriever.k = bm25_k
+    if dense_retriever is None and not use_bm25:
+        raise RuntimeError("No retriever is available. Upload documents first.")
 
+    EnsembleRetriever = _get_ensemble_retriever_class()
+    bm25_retriever = _build_bm25_retriever(bm25_k)
     return EnsembleRetriever(
         retrievers=[dense_retriever, bm25_retriever],
         weights=[dense_weight, 1 - dense_weight],
@@ -187,7 +294,7 @@ def _build_hybrid_retriever(
 
 def get_hybrid_retriever(
     chunks_for_bm25: list[Document],
-    embeddings: Embeddings,
+    embeddings: Embeddings | None,
     dense_k: int = 3,
     bm25_k: int = 3,
     dense_weight: float = 0.5,
@@ -196,7 +303,7 @@ def get_hybrid_retriever(
     return _build_hybrid_retriever(embeddings, dense_k, bm25_k, dense_weight)
 
 
-def _extract_documents_from_store(max_documents: int | None = None) -> list[Document]:
+def _extract_documents_from_vector_store(max_documents: int | None = None) -> list[Document]:
     vector_store = _new_vector_store()
     max_docs = None
     if max_documents is not None:
@@ -270,6 +377,17 @@ def _extract_documents_from_store(max_documents: int | None = None) -> list[Docu
     return rebuilt_documents
 
 
+def _extract_documents_from_store(max_documents: int | None = None) -> list[Document]:
+    sparse_docs = _extract_documents_from_sparse_store(max_documents=max_documents)
+    if sparse_docs:
+        return sparse_docs
+
+    if not _dense_retrieval_enabled():
+        return []
+
+    return _extract_documents_from_vector_store(max_documents=max_documents)
+
+
 def _initialize_retriever_from_disk(max_documents: int | None = None) -> None:
     global _bm25_documents
     if not _settings.documind_bm25_enabled:
@@ -288,20 +406,21 @@ async def initialize_retriever_from_disk(max_documents: int | None = None) -> No
 
 def _retrieve_documents(
     query: str,
-    embeddings: Embeddings,
+    embeddings: Embeddings | None,
     dense_k: int,
     bm25_k: int,
     dense_weight: float,
 ) -> list[Document]:
     global _store_has_docs
-    if not _bm25_documents:
-        if _store_has_docs is None:
-            if not _detect_store_has_documents():
-                raise RuntimeError(
-                    "Hybrid retriever is not initialized. Upload documents first."
-                )
-        elif _store_has_docs is False:
+
+    if _settings.documind_bm25_enabled and not _bm25_documents:
+        _initialize_retriever_from_disk()
+
+    if not _bm25_documents and _store_has_docs is None:
+        if not _detect_store_has_documents():
             raise RuntimeError("Hybrid retriever is not initialized. Upload documents first.")
+    elif not _bm25_documents and _store_has_docs is False and not _dense_retrieval_enabled():
+        raise RuntimeError("Hybrid retriever is not initialized. Upload documents first.")
 
     retriever = _build_hybrid_retriever(embeddings, dense_k, bm25_k, dense_weight)
     return retriever.invoke(query)
@@ -309,7 +428,7 @@ def _retrieve_documents(
 
 async def retrieve_documents(
     query: str,
-    embeddings: Embeddings,
+    embeddings: Embeddings | None,
     dense_k: int = 3,
     bm25_k: int = 3,
     dense_weight: float = 0.5,
