@@ -25,7 +25,7 @@ export default function Home() {
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isRuntimeConfigOpen, setIsRuntimeConfigOpen] = useState(false);
-  const [chatSessionKey, setChatSessionKey] = useState(0);
+  const [sessionViewKey, setSessionViewKey] = useState(0);
   const [isCurrentSessionUsed, setIsCurrentSessionUsed] = useState(false);
   const [modelProvider, setModelProvider] = useState<ModelProvider>("groq");
   const [hasApiKey, setHasApiKey] = useState(false);
@@ -113,8 +113,16 @@ export default function Home() {
           : null;
 
   const startNewSession = () => {
-    setChatSessionKey((current) => current + 1);
+    const currentSessionId = getSessionId();
+    window.localStorage.removeItem(
+      `${CHAT_HISTORY_STORAGE_PREFIX}${currentSessionId}`,
+    );
+    clearDocumentSessionState();
+    resetSessionId();
+
+    setSessionViewKey((current) => current + 1);
     setIsCurrentSessionUsed(false);
+    setIsDocumentReady(false);
     setActiveCitation(null);
   };
 
@@ -175,7 +183,7 @@ export default function Home() {
 
         <main className="mx-auto grid min-h-0 w-full max-w-[1600px] flex-1 grid-cols-1 gap-4 p-4 md:grid-cols-[3fr_2fr] lg:gap-6 lg:p-6">
           <ChatInterface
-            key={chatSessionKey}
+            key={`chat-${sessionViewKey}`}
             activeCitation={activeCitation}
             onActiveCitationChange={setActiveCitation}
             canSendMessages={canSendMessages}
@@ -183,6 +191,7 @@ export default function Home() {
             onSessionUsedChange={setIsCurrentSessionUsed}
           />
           <DocumentPanel
+            key={`document-${sessionViewKey}`}
             activeCitation={activeCitation}
             onDocumentReadyChange={setIsDocumentReady}
           />

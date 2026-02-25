@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { Loader2, Send } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 
@@ -67,6 +67,7 @@ export function ChatInterface({
   const [draft, setDraft] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -103,6 +104,19 @@ export function ChatInterface({
     const historyKey = `${CHAT_HISTORY_STORAGE_PREFIX}${getSessionId()}`;
     window.localStorage.setItem(historyKey, JSON.stringify(messages));
   }, [messages, historyHydrated]);
+
+  useEffect(() => {
+    if (!historyHydrated) return;
+
+    const frameId = window.requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({
+        block: "end",
+        behavior: isGenerating ? "auto" : "smooth",
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [historyHydrated, isGenerating, isTyping, messages]);
 
   const appendTokenToAssistant = (token: string) => {
     setMessages((current) => {
@@ -387,6 +401,7 @@ export function ChatInterface({
               <span>Generating...</span>
             </div>
           ) : null}
+          <div ref={messagesEndRef} aria-hidden="true" />
         </div>
       </ScrollArea>
       <Separator />
