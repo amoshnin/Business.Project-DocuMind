@@ -78,6 +78,7 @@ export function ChatInterface({
     if (!hasRetainedDocumentSession()) {
       window.localStorage.removeItem(historyKey);
       setMessages(INITIAL_MESSAGES);
+      onSessionUsedChange?.(false);
       resetSessionId();
       setHistoryHydrated(true);
       return;
@@ -89,14 +90,22 @@ export function ChatInterface({
         const parsed = JSON.parse(rawHistory) as ChatMessage[];
         if (Array.isArray(parsed) && parsed.length > 0) {
           setMessages(parsed);
+          onSessionUsedChange?.(
+            parsed.some((message) => message.role === "user"),
+          );
+        } else {
+          onSessionUsedChange?.(false);
         }
       } catch {
         window.localStorage.removeItem(historyKey);
+        onSessionUsedChange?.(false);
       }
+    } else {
+      onSessionUsedChange?.(false);
     }
 
     setHistoryHydrated(true);
-  }, []);
+  }, [onSessionUsedChange]);
 
   useEffect(() => {
     if (!historyHydrated || typeof window === "undefined") return;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Bot, BookOpenText, Settings, SlidersHorizontal, Sparkles } from "lucide-react";
 
@@ -30,42 +30,9 @@ export default function Home() {
   const [modelProvider, setModelProvider] = useState<ModelProvider>("groq");
   const [hasApiKey, setHasApiKey] = useState(false);
   const [isDocumentReady, setIsDocumentReady] = useState(false);
-  const [isSessionBootstrapComplete, setIsSessionBootstrapComplete] = useState(false);
   const [settingsErrorMessage, setSettingsErrorMessage] = useState<
     string | null
   >(null);
-
-  const clearCurrentSessionUiState = () => {
-    const currentSessionId = getSessionId();
-    window.localStorage.removeItem(
-      `${CHAT_HISTORY_STORAGE_PREFIX}${currentSessionId}`,
-    );
-    clearDocumentSessionState();
-  };
-
-  useLayoutEffect(() => {
-    const navigationEntries = window.performance?.getEntriesByType?.(
-      "navigation",
-    ) as PerformanceNavigationTiming[] | undefined;
-    const navigationType = navigationEntries?.[0]?.type;
-    const legacyNavigationType = (
-      window.performance as Performance & {
-        navigation?: { type?: number };
-      }
-    ).navigation?.type;
-    const isReload = navigationType === "reload" || legacyNavigationType === 1;
-
-    if (isReload) {
-      clearCurrentSessionUiState();
-      resetSessionId();
-    }
-
-    const bootstrapTimeout = window.setTimeout(() => {
-      setIsSessionBootstrapComplete(true);
-    }, 0);
-
-    return () => window.clearTimeout(bootstrapTimeout);
-  }, []);
 
   useEffect(() => {
     ensureBackendWakeup();
@@ -122,7 +89,11 @@ export default function Home() {
           : null;
 
   const startNewSession = () => {
-    clearCurrentSessionUiState();
+    const currentSessionId = getSessionId();
+    window.localStorage.removeItem(
+      `${CHAT_HISTORY_STORAGE_PREFIX}${currentSessionId}`,
+    );
+    clearDocumentSessionState();
     resetSessionId();
 
     setSessionViewKey((current) => current + 1);
@@ -187,23 +158,24 @@ export default function Home() {
         </header>
 
         <main className="mx-auto grid min-h-0 w-full max-w-[1600px] flex-1 grid-cols-1 gap-4 p-4 md:grid-cols-[3fr_2fr] lg:gap-6 lg:p-6">
-          {isSessionBootstrapComplete ? (
-            <>
-              <ChatInterface
-                key={`chat-${sessionViewKey}`}
-                activeCitation={activeCitation}
-                onActiveCitationChange={setActiveCitation}
-                canSendMessages={canSendMessages}
-                blockedReason={chatBlockedReason}
-                onSessionUsedChange={setIsCurrentSessionUsed}
-              />
-              <DocumentPanel
-                key={`document-${sessionViewKey}`}
-                activeCitation={activeCitation}
-                onDocumentReadyChange={setIsDocumentReady}
-              />
-            </>
-          ) : null}
+          <ChatInterface
+            key={`chat-${sessionViewKey}`}
+            activeCitation={activeCitation}
+            onActiveCitationChange={setActiveCitation}
+            canSendMessages={canSendMessages}
+            blockedReason={chatBlockedReason}
+            onSessionUsedChange={setIsCurrentSessionUsed}
+          />
+          <DocumentPanel
+            key={`document-${sessionViewKey}`}
+            activeCitation={activeCitation}
+            onDocumentReadyChange={(ready) => {
+              setIsDocumentReady(ready);
+              if (ready) {
+                setIsCurrentSessionUsed(true);
+              }
+            }}
+          />
         </main>
         {isSettingsModalOpen ? (
           <SettingsModal
