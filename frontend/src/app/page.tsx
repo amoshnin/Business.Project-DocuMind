@@ -88,6 +88,29 @@ export default function LandingPage() {
               <div className="hidden rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs text-zinc-300 sm:block">
                 Artem Moshnin · Lead Software Engineer
               </div>
+              <Button
+                asChild
+                size="sm"
+                variant="outline"
+                className="h-8 rounded-lg border-white/15 bg-white/5 text-white hover:bg-white/10"
+              >
+                <Link href="/demo">
+                  <PlayCircle className="size-4" />
+                  Demo
+                </Link>
+              </Button>
+              <Button
+                asChild
+                size="sm"
+                variant="outline"
+                className="h-8 rounded-lg border-white/15 bg-white/5 text-white hover:bg-white/10"
+              >
+                <Link href="/architecture">
+                  <BookOpenText className="size-4" />
+                  Architecture
+                </Link>
+              </Button>
+              <ThemeToggle />
             </div>
           </div>
         </header>
