@@ -30,9 +30,18 @@ export default function Home() {
   const [modelProvider, setModelProvider] = useState<ModelProvider>("groq");
   const [hasApiKey, setHasApiKey] = useState(false);
   const [isDocumentReady, setIsDocumentReady] = useState(false);
+  const [isSessionBootstrapComplete, setIsSessionBootstrapComplete] = useState(false);
   const [settingsErrorMessage, setSettingsErrorMessage] = useState<
     string | null
   >(null);
+
+  const clearCurrentSessionUiState = () => {
+    const currentSessionId = getSessionId();
+    window.localStorage.removeItem(
+      `${CHAT_HISTORY_STORAGE_PREFIX}${currentSessionId}`,
+    );
+    clearDocumentSessionState();
+  };
 
   useLayoutEffect(() => {
     const navigationEntries = window.performance?.getEntriesByType?.(
@@ -46,16 +55,16 @@ export default function Home() {
     ).navigation?.type;
     const isReload = navigationType === "reload" || legacyNavigationType === 1;
 
-    if (!isReload) {
-      return;
+    if (isReload) {
+      clearCurrentSessionUiState();
+      resetSessionId();
     }
 
-    const currentSessionId = getSessionId();
-    clearDocumentSessionState();
-    window.localStorage.removeItem(
-      `${CHAT_HISTORY_STORAGE_PREFIX}${currentSessionId}`,
-    );
-    resetSessionId();
+    const bootstrapTimeout = window.setTimeout(() => {
+      setIsSessionBootstrapComplete(true);
+    }, 0);
+
+    return () => window.clearTimeout(bootstrapTimeout);
   }, []);
 
   useEffect(() => {
@@ -113,11 +122,7 @@ export default function Home() {
           : null;
 
   const startNewSession = () => {
-    const currentSessionId = getSessionId();
-    window.localStorage.removeItem(
-      `${CHAT_HISTORY_STORAGE_PREFIX}${currentSessionId}`,
-    );
-    clearDocumentSessionState();
+    clearCurrentSessionUiState();
     resetSessionId();
 
     setSessionViewKey((current) => current + 1);
@@ -182,19 +187,23 @@ export default function Home() {
         </header>
 
         <main className="mx-auto grid min-h-0 w-full max-w-[1600px] flex-1 grid-cols-1 gap-4 p-4 md:grid-cols-[3fr_2fr] lg:gap-6 lg:p-6">
-          <ChatInterface
-            key={`chat-${sessionViewKey}`}
-            activeCitation={activeCitation}
-            onActiveCitationChange={setActiveCitation}
-            canSendMessages={canSendMessages}
-            blockedReason={chatBlockedReason}
-            onSessionUsedChange={setIsCurrentSessionUsed}
-          />
-          <DocumentPanel
-            key={`document-${sessionViewKey}`}
-            activeCitation={activeCitation}
-            onDocumentReadyChange={setIsDocumentReady}
-          />
+          {isSessionBootstrapComplete ? (
+            <>
+              <ChatInterface
+                key={`chat-${sessionViewKey}`}
+                activeCitation={activeCitation}
+                onActiveCitationChange={setActiveCitation}
+                canSendMessages={canSendMessages}
+                blockedReason={chatBlockedReason}
+                onSessionUsedChange={setIsCurrentSessionUsed}
+              />
+              <DocumentPanel
+                key={`document-${sessionViewKey}`}
+                activeCitation={activeCitation}
+                onDocumentReadyChange={setIsDocumentReady}
+              />
+            </>
+          ) : null}
         </main>
         {isSettingsModalOpen ? (
           <SettingsModal
