@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import Link from "next/link";
 import { Bot, BookOpenText, Settings, SlidersHorizontal, Sparkles } from "lucide-react";
 
@@ -13,9 +13,13 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { DOCUMIND_AUTH_ERROR_EVENT } from "@/lib/api-client";
 import { getUserApiKey } from "@/lib/api-key";
+import { getSessionId, resetSessionId } from "@/lib/chat-api";
 import { ensureBackendWakeup } from "@/lib/backend-status";
 import { Citation } from "@/lib/citations";
+import { clearDocumentSessionState } from "@/lib/document-session";
 import { getModelProvider, type ModelProvider } from "@/lib/model-provider";
+
+const CHAT_HISTORY_STORAGE_PREFIX = "documind_messages_";
 
 export default function Home() {
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
@@ -29,6 +33,30 @@ export default function Home() {
   const [settingsErrorMessage, setSettingsErrorMessage] = useState<
     string | null
   >(null);
+
+  useLayoutEffect(() => {
+    const navigationEntries = window.performance?.getEntriesByType?.(
+      "navigation",
+    ) as PerformanceNavigationTiming[] | undefined;
+    const navigationType = navigationEntries?.[0]?.type;
+    const legacyNavigationType = (
+      window.performance as Performance & {
+        navigation?: { type?: number };
+      }
+    ).navigation?.type;
+    const isReload = navigationType === "reload" || legacyNavigationType === 1;
+
+    if (!isReload) {
+      return;
+    }
+
+    const currentSessionId = getSessionId();
+    clearDocumentSessionState();
+    window.localStorage.removeItem(
+      `${CHAT_HISTORY_STORAGE_PREFIX}${currentSessionId}`,
+    );
+    resetSessionId();
+  }, []);
 
   useEffect(() => {
     ensureBackendWakeup();
