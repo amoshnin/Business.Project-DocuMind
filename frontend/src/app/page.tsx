@@ -13,7 +13,6 @@ import {
   Workflow,
 } from "lucide-react"
 
-import { ThemeToggle } from "@/components/ThemeToggle"
 import { Button } from "@/components/ui/button"
 
 const highlights = [
@@ -110,7 +109,6 @@ export default function LandingPage() {
                   Architecture
                 </Link>
               </Button>
-              <ThemeToggle />
             </div>
           </div>
         </header>
