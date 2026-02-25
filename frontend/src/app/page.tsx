@@ -80,7 +80,6 @@ export default function LandingPage() {
                 <p className="text-sm font-semibold tracking-tight text-zinc-100">
                   DocuMind
                 </p>
-                <p className="text-xs text-zinc-400">Product landing page</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
