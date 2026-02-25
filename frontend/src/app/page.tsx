@@ -19,21 +19,21 @@ import { Button } from "@/components/ui/button"
 const highlights = [
   {
     icon: Workflow,
-    title: "Reliable Retrieval Foundation",
+    title: "Hybrid Retrieval, Not Just Embeddings",
     description:
-      "Hybrid retrieval combines lexical and semantic search to keep answers grounded in the uploaded source material.",
+      "Dense vector embeddings capture semantic similarity; BM25 captures exact terms, policy IDs, and acronyms. The ensemble retriever combines both - so answers don't drift semantically or miss precise matches.",
   },
   {
     icon: Sparkles,
-    title: "Clear, Cited Responses",
+    title: "Every Claim Has a Source",
     description:
-      "Answers are fast and easy to review, with page-level citations that support trust and verification.",
+      "Answers stream with sub-second time-to-first-token and arrive with page-level citations generated in a single model pass - no second validation step, no fabricated references.",
   },
   {
     icon: ShieldCheck,
-    title: "Flexible Provider Support",
+    title: "Your Keys, Your Data",
     description:
-      "The product is structured to support multiple model providers while keeping configuration explicit and maintainable.",
+      "Strict BYOK (Bring Your Own Key) architecture ensures documents are never processed through shared corporate pipelines. Route between Groq and OpenAI based on latency, cost, or rate limits - without touching your data policy.",
   },
 ]
 
@@ -41,36 +41,36 @@ const overviewCards = [
   {
     icon: Briefcase,
     label: "Workspace",
-    title: "Enterprise-style document AI demo",
+    title: "Document Q&A Workspace",
     description:
-      "A polished interface that shows how teams can work with internal documents using grounded AI.",
+      "Upload internal documents and query them conversationally. Every answer is grounded in the source - no fabricated context, no guessing.",
   },
   {
     icon: Layers3,
     label: "Pipeline",
-    title: "Ingestion, retrieval, and chat in one flow",
+    title: "End-to-End RAG Pipeline",
     description:
-      "The flow covers PDF upload, chunking, retrieval, and answer generation in one experience.",
+      "PDF ingestion, metadata-preserving chunking, hybrid retrieval, and streaming generation - all in a single coherent flow from file to answer.",
   },
   {
     icon: BookOpenText,
     label: "Documentation",
-    title: "Architecture mini-book included",
+    title: "Architecture Deep-Dive",
     description:
-      "A dedicated architecture view explains the key implementation decisions in a structured format.",
+      "A structured walkthrough of the key engineering decisions: why hybrid retrieval, how BYOK security works, and how single-pass streaming reduces latency and token cost.",
   },
 ]
 
 export default function LandingPage() {
   return (
-    <main className="relative h-dvh overflow-hidden bg-[#0c0f14] text-zinc-100">
+    <main className="relative min-h-dvh overflow-x-hidden bg-[#0c0f14] text-zinc-100">
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute left-[-4rem] top-8 h-72 w-72 rounded-full bg-cyan-400/10 blur-3xl" />
         <div className="absolute right-[-4rem] top-16 h-80 w-80 rounded-full bg-blue-400/10 blur-3xl" />
         <div className="absolute bottom-[-4rem] left-1/3 h-72 w-[34rem] rounded-full bg-emerald-300/5 blur-3xl" />
       </div>
 
-      <div className="relative mx-auto flex h-full w-full max-w-7xl flex-col px-4 pb-5 pt-3 sm:px-6 lg:px-8">
+      <div className="relative mx-auto flex w-full max-w-[1840px] flex-col px-4 pb-5 pt-3 sm:px-6 lg:px-8">
         <header className="mb-5 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 shadow-[0_12px_40px_-30px_rgba(0,0,0,0.7)] backdrop-blur-xl">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
@@ -88,27 +88,27 @@ export default function LandingPage() {
               <div className="hidden rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs text-zinc-300 sm:block">
                 Artem Moshnin · Lead Software Engineer
               </div>
-              <ThemeToggle />
             </div>
           </div>
         </header>
 
-        <section className="grid min-h-0 flex-1 items-stretch gap-5 lg:grid-cols-[1.08fr_0.92fr]">
+        <section className="grid items-stretch gap-6 lg:grid-cols-[1.04fr_0.92fr]">
           <div className="rounded-3xl border border-white/10 bg-white/5 p-5 shadow-[0_30px_90px_-60px_rgba(0,0,0,0.85)] backdrop-blur-xl sm:p-6">
             <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs text-zinc-300">
               <Sparkles className="size-3.5 text-zinc-300" />
-              Professional document intelligence showcase
+              Query your documents. Trust every answer.
             </div>
 
             <h1 className="max-w-3xl text-3xl font-semibold tracking-tight text-white sm:text-4xl lg:text-5xl">
-              DocuMind brings clarity to document-based AI workflows.
+              DocuMind: document AI that answers from source, not from
+              guesswork.
             </h1>
 
             <p className="mt-4 max-w-2xl text-sm leading-6 text-zinc-300 sm:text-base">
-              This project presents DocuMind as a polished experience for
-              uploading documents, asking grounded questions, and reviewing cited
-              answers. It also includes a dedicated architecture guide for a
-              deeper technical walkthrough.
+              Upload a PDF, ask questions in plain language, and get precise
+              answers tied directly to the source. No hallucinations. No
+              third-party data exposure. The architecture guide walks through
+              every implementation decision behind the retrieval pipeline.
             </p>
 
             <div className="mt-5 flex flex-col gap-3 sm:flex-row">
@@ -143,7 +143,7 @@ export default function LandingPage() {
                     At a glance
                   </p>
                   <p className="mt-1 text-sm text-zinc-300">
-                    What is included in this project
+                    What DocuMind does
                   </p>
                 </div>
                 <div className="hidden rounded-full border border-white/10 bg-black/20 px-3 py-1 text-xs text-zinc-300 sm:block">
@@ -152,25 +152,27 @@ export default function LandingPage() {
               </div>
 
               <div className="grid gap-3 sm:grid-cols-3">
-                {overviewCards.map(({ icon: Icon, label, title, description }) => (
-                  <article
-                    key={title}
-                    className="rounded-2xl border border-white/10 bg-black/20 p-4 transition-colors hover:bg-white/10"
-                  >
-                    <div className="mb-3 flex size-9 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-zinc-200">
-                      <Icon className="size-4" />
-                    </div>
-                    <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-zinc-400">
-                      {label}
-                    </p>
-                    <h3 className="mt-1 text-sm font-semibold leading-5 text-white">
-                      {title}
-                    </h3>
-                    <p className="mt-2 text-xs leading-5 text-zinc-300">
-                      {description}
-                    </p>
-                  </article>
-                ))}
+                {overviewCards.map(
+                  ({ icon: Icon, label, title, description }) => (
+                    <article
+                      key={title}
+                      className="rounded-2xl border border-white/10 bg-black/20 p-4 transition-colors hover:bg-white/10"
+                    >
+                      <div className="mb-3 flex size-9 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-zinc-200">
+                        <Icon className="size-4" />
+                      </div>
+                      <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-zinc-400">
+                        {label}
+                      </p>
+                      <h3 className="mt-1 text-sm font-semibold leading-5 text-white">
+                        {title}
+                      </h3>
+                      <p className="mt-2 text-xs leading-5 text-zinc-300">
+                        {description}
+                      </p>
+                    </article>
+                  ),
+                )}
               </div>
             </div>
           </div>
@@ -192,10 +194,12 @@ export default function LandingPage() {
               </div>
 
               <p className="text-sm leading-6 text-zinc-300">
-                I&apos;m Artem Moshnin. I built DocuMind as an engineering
-                challenge and product design exercise: to create a document AI
-                experience that feels clean, trustworthy, and grounded in source
-                evidence.
+                I&apos;m Artem Moshnin. I built DocuMind because most document
+                AI tools share the same two failure modes: they hallucinate
+                facts that aren't in the source, and they send your documents to
+                third-party models you don't control. DocuMind was built to fix
+                both - strict source grounding at every layer, and a BYOK
+                architecture that keeps your data yours.
               </p>
 
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -205,8 +209,9 @@ export default function LandingPage() {
                     <p className="text-sm font-medium">UX Focus</p>
                   </div>
                   <p className="mt-2 text-sm leading-5 text-zinc-300">
-                    Designed for clarity, trust, and a smooth workflow from file
-                    upload to answer review.
+                    Every interface decision is built around one goal: making it
+                    easy to verify that an answer is actually in the document.
+                    Citations are page-level, not decorative.
                   </p>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
@@ -215,8 +220,11 @@ export default function LandingPage() {
                     <p className="text-sm font-medium">Technical Depth</p>
                   </div>
                   <p className="mt-2 text-sm leading-5 text-zinc-300">
-                    Includes ingestion, retrieval, streaming responses, and a
-                    vendor-agnostic AI integration approach.
+                    Hybrid retrieval (Chroma vector embeddings + BM25 lexical
+                    search), conversational query reformulation, single-pass
+                    streaming with structured citation output, and
+                    vendor-agnostic LLM routing between Groq/Llama 3 and OpenAI
+                    GPT-4o.
                   </p>
                 </div>
               </div>
