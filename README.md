@@ -81,7 +81,26 @@ source .venv/bin/activate
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### 4) Frontend setup and run (Next.js)
+### 4) Run backend with Docker
+
+Create `backend/.env` from the example and set at least `GROQ_API_KEY`:
+
+```bash
+cp backend/.env.example backend/.env
+docker compose up --build backend
+```
+
+The container exposes the API at `http://localhost:8000`. Chroma data is stored in
+the `documind_chroma` Docker volume and mounted at `/var/data/chroma`.
+
+By default, the Docker image installs the sparse/BM25 runtime dependencies used by
+`DOCUMIND_DENSE_ENABLED=false`. To build with dense retrieval dependencies:
+
+```bash
+docker compose build --build-arg INSTALL_DENSE=true backend
+```
+
+### 5) Frontend setup and run (Next.js)
 
 ```bash
 cd frontend

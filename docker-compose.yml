@@ -1,0 +1,35 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      CHROMA_PERSIST_DIR: /var/data/chroma
+      DOCUMIND_DENSE_ENABLED: "${DOCUMIND_DENSE_ENABLED:-false}"
+      DOCUMIND_BM25_ENABLED: "${DOCUMIND_BM25_ENABLED:-true}"
+      DOCUMIND_BM25_MAX_DOCS: "${DOCUMIND_BM25_MAX_DOCS:-5000}"
+      DOCUMIND_WARM_RETRIEVER_ON_STARTUP: "${DOCUMIND_WARM_RETRIEVER_ON_STARTUP:-false}"
+      DOCUMIND_MAX_UPLOAD_MB: "${DOCUMIND_MAX_UPLOAD_MB:-20}"
+      GROQ_MODEL: "${GROQ_MODEL:-llama-3.1-8b-instant}"
+    volumes:
+      - documind_chroma:/var/data/chroma
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  documind_chroma:
