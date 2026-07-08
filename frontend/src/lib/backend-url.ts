@@ -1,8 +1,14 @@
 const DEFAULT_DEV_API_URL = "http://localhost:8000";
-const DEFAULT_PROD_API_URL = "https://documind-fastapi-backend.onrender.com";
+const DEFAULT_PROD_API_URL = "https://docu-mind.artemmoshnin.com";
 
 function normalizeBaseUrl(rawUrl: string): string {
-  return rawUrl.trim().replace(/\/+$/, "");
+  const trimmedUrl = rawUrl.trim().replace(/\/+$/, "");
+
+  if (/^https?:\/\//i.test(trimmedUrl)) {
+    return trimmedUrl;
+  }
+
+  return `https://${trimmedUrl}`;
 }
 
 export function getApiBaseUrl(): string {
